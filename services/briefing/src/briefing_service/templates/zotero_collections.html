@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Zotero Collections</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    .approved { color: #0a7d2c; font-weight: bold; }
+    .pending { color: #8a4b00; font-weight: bold; }
+    .actions form { display: inline; }
+  </style>
+</head>
+<body>
+  <h1>Zotero Collections</h1>
+  <form method="post" action="/zotero/collections/refresh">
+    <button type="submit">Refresh Collections</button>
+  </form>
+  <p>Total collections: {{ collections|length }}</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Name</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for collection_id, name, approved, _ in collections %}
+        <tr>
+          <td>
+            {% if approved %}
+              <span class="approved">Approved</span>
+            {% else %}
+              <span class="pending">Pending</span>
+            {% endif %}
+          </td>
+          <td>{{ name }}</td>
+          <td class="actions">
+            {% if approved %}
+              <form method="post" action="/zotero/collections/reject">
+                <input type="hidden" name="collection_id" value="{{ collection_id }}">
+                <button type="submit">Reject</button>
+              </form>
+            {% else %}
+              <form method="post" action="/zotero/collections/approve">
+                <input type="hidden" name="collection_id" value="{{ collection_id }}">
+                <button type="submit">Approve</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

@@ -1,0 +1,39 @@
+# TI Stack Deployment - Example Configuration
+#
+# Copy to master-config.toml and update with your settings.
+# Any value starting with "op read" will be executed to fetch secrets.
+
+[deployment]
+server_name = "ti-stack"
+server_type = "cx23"
+server_image = "debian-13"
+location = "hel1"
+install_dir = "/opt/ti"
+ssh_user = "root"
+ssh_port = 22
+
+# SSH key names in your Hetzner account
+ssh_keys = ["Your SSH Key Name"]
+
+[repo]
+url = "https://github.com/reuteras/ti.git"
+branch = "main"
+
+[tailscale]
+authkey = ""
+# Or: "op read op://Personal/Tailscale/ti_authkey"
+tailscale_domain = ""
+# Example: "tail12345.ts.net"
+hostname = "ti-stack"
+use_tailscale_ssh = false
+
+[email]
+scaleway_domain = ""
+smtp_host = "smtp.tem.scw.cloud"
+smtp_port = 587
+smtp_user = ""
+# Or: "op read op://Personal/Scaleway/smtp_user"
+smtp_password = ""
+# Or: "op read op://Personal/Scaleway/smtp_password"
+email_from = ""
+email_to = ""

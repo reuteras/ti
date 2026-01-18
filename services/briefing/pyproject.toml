@@ -1,0 +1,27 @@
+[project]
+name = "briefing-service"
+version = "0.1.0"
+description = "Briefing service for personal CTI"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "apscheduler>=3.10.4",
+  "httpx>=0.27.0",
+  "jinja2>=3.1.4",
+  "python-multipart>=0.0.9",
+  "readwise-api @ git+https://github.com/reuteras/readwise-api",
+]
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/briefing_service"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

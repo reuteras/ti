@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Readwise Tags</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    .approved { color: #0a7d2c; font-weight: bold; }
+    .pending { color: #8a4b00; font-weight: bold; }
+    .actions form { display: inline; }
+  </style>
+</head>
+<body>
+  <h1>Readwise Tags</h1>
+  <form method="post" action="/readwise/tags/refresh">
+    <button type="submit">Refresh Tags</button>
+  </form>
+  <p>Total tags: {{ tags|length }}</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Tag</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tag, approved, _ in tags %}
+        <tr>
+          <td>
+            {% if approved %}
+              <span class="approved">Approved</span>
+            {% else %}
+              <span class="pending">Pending</span>
+            {% endif %}
+          </td>
+          <td>{{ tag }}</td>
+          <td class="actions">
+            {% if approved %}
+              <form method="post" action="/readwise/tags/reject">
+                <input type="hidden" name="tag" value="{{ tag }}">
+                <button type="submit">Reject</button>
+              </form>
+            {% else %}
+              <form method="post" action="/readwise/tags/approve">
+                <input type="hidden" name="tag" value="{{ tag }}">
+                <button type="submit">Approve</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

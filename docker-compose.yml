@@ -1,0 +1,446 @@
+---
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.9
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2025-06-13T11-33-47Z
+    command: server /data
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:8.4.0
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4.2-management
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=opencti
+      - POSTGRES_PASSWORD=opencti
+      - POSTGRES_DB=opencti
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opencti"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  opencti:
+    image: opencti/platform:6.9.8
+    env_file:
+      - .env
+    environment:
+      - APP__PORT=${OPENCTI_APP__PORT:-8080}
+      - APP__BASE_URL=${OPENCTI_APP__WEB_URL:-http://localhost:8080}
+      - APP__ADMIN__EMAIL=${OPENCTI_APP__ADMIN__EMAIL}
+      - APP__ADMIN__PASSWORD=${OPENCTI_APP__ADMIN__PASSWORD}
+      - APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - APP__APP_LOGS__LEVEL=${OPENCTI_APP__APP_LOGS__LEVEL:-info}
+      - APP__APP_LOGS__FORMAT=${OPENCTI_APP__APP_LOGS__FORMAT:-plain}
+      - APP__HEALTH_ACCESS_KEY=${OPENCTI_HEALTHCHECK_ACCESS_KEY}
+      - REDIS__HOSTNAME=${OPENCTI_APP__REDIS__HOSTNAME:-redis}
+      - REDIS__PORT=${OPENCTI_APP__REDIS__PORT:-6379}
+      - RABBITMQ__HOSTNAME=${OPENCTI_APP__RABBITMQ__HOSTNAME:-rabbitmq}
+      - RABBITMQ__PORT=${OPENCTI_APP__RABBITMQ__PORT:-5672}
+      - RABBITMQ__MANAGEMENT_PORT=${OPENCTI_APP__RABBITMQ__MANAGEMENT_PORT:-15672}
+      - RABBITMQ__USERNAME=${RABBITMQ_DEFAULT_USER}
+      - RABBITMQ__PASSWORD=${RABBITMQ_DEFAULT_PASS}
+      - ELASTICSEARCH__URL=${OPENCTI_APP__ELASTICSEARCH__URL:-http://elasticsearch:9200}
+      - ELASTICSEARCH__NUMBER_OF_REPLICAS=0
+      - MINIO__ENDPOINT=minio
+      - MINIO__PORT=9000
+      - MINIO__USE_SSL=false
+      - MINIO__ACCESS_KEY=${MINIO_ROOT_USER}
+      - MINIO__SECRET_KEY=${MINIO_ROOT_PASSWORD}
+      - DATABASE__URL=${OPENCTI_APP__DATABASE__URL}
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "${OPENCTI_APP_PORT:-8080}:8080"
+    volumes:
+      - opencti-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- \"http://localhost:8080/health?health_access_key=${OPENCTI_HEALTHCHECK_ACCESS_KEY}\" > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  opencti-init:
+    build:
+      context: services/opencti-init
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - OPENCTI_MINIFLUX_TOKEN=${OPENCTI_MINIFLUX_TOKEN}
+      - OPENCTI_READWISE_TOKEN=${OPENCTI_READWISE_TOKEN}
+      - OPENCTI_ZOTERO_TOKEN=${OPENCTI_ZOTERO_TOKEN}
+      - OPENCTI_USER_EMAIL=${OPENCTI_USER_EMAIL}
+      - OPENCTI_USER_PASSWORD=${OPENCTI_USER_PASSWORD}
+      - OPENCTI_USER_NAME=${OPENCTI_USER_NAME}
+      - OPENCTI_USER_ROLE=${OPENCTI_USER_ROLE:-Analyst}
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  briefing:
+    build:
+      context: services/briefing
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - BRIEFING_DB_PATH=${BRIEFING_DB_PATH:-/data/briefing.sqlite}
+      - BRIEFING_TIMEZONE=${BRIEFING_TIMEZONE:-Europe/Stockholm}
+      - BRIEFING_SCHEDULE_HOUR=${BRIEFING_SCHEDULE_HOUR:-4}
+      - BRIEFING_SCHEDULE_MINUTE=${BRIEFING_SCHEDULE_MINUTE:-5}
+      - BRIEFING_BASE_URL=${BRIEFING_BASE_URL:-http://localhost:8088}
+      - MINIFLUX_URL=${MINIFLUX_URL}
+      - MINIFLUX_TOKEN=${MINIFLUX_TOKEN}
+      - READWISE_TOKEN=${READWISE_TOKEN}
+      - ZOTERO_API_KEY=${ZOTERO_API_KEY}
+      - ZOTERO_LIBRARY_ID=${ZOTERO_LIBRARY_ID}
+      - ZOTERO_LIBRARY_TYPE=${ZOTERO_LIBRARY_TYPE:-user}
+    ports:
+      - "8088:8088"
+    volumes:
+      - briefing-data:/data
+    depends_on:
+      opencti:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8088/health').read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  connector-miniflux:
+    build:
+      context: services/connectors
+      dockerfile: miniflux/Dockerfile
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - OPENCTI_TOKEN=${OPENCTI_MINIFLUX_TOKEN}
+      - CONNECTOR_NAME=miniflux
+      - CONNECTOR_SCOPE=miniflux
+      - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-600}
+      - MINIFLUX_URL=${MINIFLUX_URL}
+      - MINIFLUX_TOKEN=${MINIFLUX_TOKEN}
+    volumes:
+      - miniflux-state:/data
+    depends_on:
+      opencti:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  connector-readwise:
+    build:
+      context: services/connectors
+      dockerfile: readwise/Dockerfile
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - OPENCTI_TOKEN=${OPENCTI_READWISE_TOKEN}
+      - CONNECTOR_NAME=readwise
+      - CONNECTOR_SCOPE=readwise
+      - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-600}
+      - READWISE_TOKEN=${READWISE_TOKEN}
+    volumes:
+      - readwise-state:/data
+    depends_on:
+      opencti:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  connector-zotero:
+    build:
+      context: services/connectors
+      dockerfile: zotero/Dockerfile
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - OPENCTI_TOKEN=${OPENCTI_ZOTERO_TOKEN}
+      - CONNECTOR_NAME=zotero
+      - CONNECTOR_SCOPE=zotero
+      - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-600}
+      - ZOTERO_API_KEY=${ZOTERO_API_KEY}
+      - ZOTERO_LIBRARY_ID=${ZOTERO_LIBRARY_ID}
+      - ZOTERO_LIBRARY_TYPE=${ZOTERO_LIBRARY_TYPE:-user}
+    volumes:
+      - zotero-state:/data
+    depends_on:
+      opencti:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  connector-cve:
+    image: opencti/connector-cve:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${CVE_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=CIRCL CVE
+      - CONNECTOR_SCOPE=vulnerability
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_RUN_INTERVAL=3600
+      - CONNECTOR_UPDATE_EXISTING_DATA=true
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-cisa-kev:
+    image: opencti/connector-cisa-known-exploited-vulnerabilities:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${CISA_KEV_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=CISA KEV
+      - CONNECTOR_SCOPE=vulnerability
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_RUN_INTERVAL=21600
+      - CONNECTOR_UPDATE_EXISTING_DATA=true
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-mitre:
+    image: opencti/connector-mitre:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${MITRE_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=MITRE ATT&CK
+      - CONNECTOR_SCOPE=attack-pattern,intrusion-set,malware,tool,campaign,course-of-action,relationship,identity,location
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_RUN_INTERVAL=86400
+      - CONNECTOR_UPDATE_EXISTING_DATA=true
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-otx:
+    image: opencti/connector-alienvault:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${OTX_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=AlienVault OTX
+      - CONNECTOR_SCOPE=indicator,malware,threat-actor,tool
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_RUN_INTERVAL=3600
+      - CONNECTOR_UPDATE_EXISTING_DATA=true
+      - ALIENVAULT_API_KEY=${ALIENVAULT_API_KEY}
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-threatfox:
+    image: opencti/connector-threatfox:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${THREATFOX_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=abuse.ch ThreatFox
+      - CONNECTOR_SCOPE=indicator,malware,threat-actor
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_RUN_INTERVAL=3600
+      - CONNECTOR_UPDATE_EXISTING_DATA=true
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-first-epss:
+    image: opencti/connector-first-epss:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${FIRST_EPSS_CONNECTOR_ID}
+      - CONNECTOR_TYPE=INTERNAL_ENRICHMENT
+      - CONNECTOR_NAME=FIRST EPSS
+      - CONNECTOR_SCOPE=vulnerability
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_RUN_INTERVAL=86400
+      - CONNECTOR_UPDATE_EXISTING_DATA=true
+      - FIRST_EPSS_API_KEY=${FIRST_EPSS_API_KEY}
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-virustotal:
+    image: opencti/connector-virustotal:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${VIRUSTOTAL_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=VirusTotal
+      - CONNECTOR_SCOPE=indicator,malware
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_RUN_INTERVAL=3600
+      - CONNECTOR_UPDATE_EXISTING_DATA=true
+      - VIRUSTOTAL_TOKEN=${VIRUSTOTAL_TOKEN}
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-shodan-internetdb:
+    image: opencti/connector-shodan-internetdb:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${SHODAN_INTERNETDB_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=Shodan InternetDB
+      - CONNECTOR_SCOPE=ipv4-addr,hostname
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_RUN_INTERVAL=3600
+      - CONNECTOR_UPDATE_EXISTING_DATA=true
+      - SHODAN_TOKEN=${SHODAN_TOKEN}
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-shodan:
+    image: opencti/connector-shodan:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${SHODAN_CONNECTOR_ID}
+      - CONNECTOR_TYPE=INTERNAL_ENRICHMENT
+      - CONNECTOR_NAME=Shodan
+      - CONNECTOR_SCOPE=ipv4-addr,hostname
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_RUN_INTERVAL=3600
+      - CONNECTOR_UPDATE_EXISTING_DATA=true
+      - SHODAN_TOKEN=${SHODAN_TOKEN}
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-opencti-datasets:
+    image: opencti/connector-opencti:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${OPENCTI_DATASETS_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=OpenCTI Datasets
+      - CONNECTOR_SCOPE=collection
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_RUN_INTERVAL=86400
+      - CONNECTOR_UPDATE_EXISTING_DATA=true
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+volumes:
+  elasticsearch-data:
+  minio-data:
+  redis-data:
+  rabbitmq-data:
+  postgres-data:
+  opencti-data:
+  briefing-data:
+  miniflux-state:
+  readwise-state:
+  zotero-state:

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Daily Briefing</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .item { margin-bottom: 24px; }
+    .meta { color: #666; font-size: 0.9em; }
+    .watch { color: #b30000; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Daily Briefing - {{ date }}</h1>
+  {% if items %}
+    {% for item in items %}
+      <div class="item">
+        <h2>{{ item.title }}</h2>
+        <div class="meta">Created: {{ item.created_at }}</div>
+        {% if item.watch_hit %}
+          <div class="watch">Watch alert</div>
+        {% endif %}
+        <p>{{ item.description }}</p>
+        {% if item.source_url %}
+          <div><a href="{{ item.source_url }}">Source</a></div>
+        {% endif %}
+        {% if item.cves %}
+          <div>CVEs: {{ item.cves | join(", ") }}</div>
+        {% endif %}
+        {% if item.observables %}
+          <div>Observables: {{ item.observables | join(", ") }}</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% else %}
+    <p>No items found in this briefing window.</p>
+  {% endif %}
+</body>
+</html>

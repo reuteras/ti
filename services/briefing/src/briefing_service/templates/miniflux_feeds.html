@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Miniflux Feeds</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    .approved { color: #0a7d2c; font-weight: bold; }
+    .pending { color: #8a4b00; font-weight: bold; }
+    .actions form { display: inline; }
+  </style>
+</head>
+<body>
+  <h1>Miniflux Feeds</h1>
+  <form method="post" action="/miniflux/feeds/refresh">
+    <button type="submit">Refresh Feeds</button>
+  </form>
+  <p>Total feeds: {{ feeds|length }}</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Category</th>
+        <th>Title</th>
+        <th>Site</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for feed in feeds %}
+        <tr>
+          <td>
+            {% if feed.approved %}
+              <span class="approved">Approved</span>
+            {% else %}
+              <span class="pending">Pending</span>
+            {% endif %}
+          </td>
+          <td>
+            {{ feed.category_title }}
+            {% if not feed.approved and feed.category_id %}<br>
+              <form method="post" action="/miniflux/categories/{{ feed.category_id }}/approve">
+                <button type="submit">Approve Category</button>
+              </form>
+            {% endif %}
+          </td>
+          <td>{{ feed.title }}</td>
+          <td><a href="{{ feed.site_url }}">{{ feed.site_url }}</a></td>
+          <td class="actions">
+            {% if feed.approved %}
+              <form method="post" action="/miniflux/feeds/{{ feed.feed_id }}/reject">
+                <button type="submit">Reject</button>
+              </form>
+            {% else %}
+              <form method="post" action="/miniflux/feeds/{{ feed.feed_id }}/approve">
+                <button type="submit">Approve</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
