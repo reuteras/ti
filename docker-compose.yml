@@ -302,25 +302,6 @@ services:
       opencti:
         condition: service_healthy
 
-  connector-otx:
-    image: opencti/connector-alienvault:latest
-    env_file:
-      - .env
-    environment:
-      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
-      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - CONNECTOR_ID=${OTX_CONNECTOR_ID}
-      - CONNECTOR_TYPE=EXTERNAL_IMPORT
-      - CONNECTOR_NAME=AlienVault OTX
-      - CONNECTOR_SCOPE=indicator,malware,threat-actor,tool
-      - CONNECTOR_LOG_LEVEL=info
-      - CONNECTOR_RUN_INTERVAL=3600
-      - CONNECTOR_UPDATE_EXISTING_DATA=true
-      - ALIENVAULT_API_KEY=${ALIENVAULT_API_KEY}
-    depends_on:
-      opencti:
-        condition: service_healthy
-
   connector-threatfox:
     image: opencti/connector-threatfox:latest
     env_file:
