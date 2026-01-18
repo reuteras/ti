@@ -1,25 +1,22 @@
-name: osv-scanner
+---
+# From https://google.github.io/osv-scanner/github-action/
+name: OSV-Scanner Scheduled Scan
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
   schedule:
-    - cron: "23 3 * * 1"
+    - cron: "30 2 * * *"
+  # Change "main" to your default branch if you use a different name, i.e. "master"
+  push:
+    branches: [main]
 
 permissions:
+  # Required to upload SARIF file to CodeQL. See: https://github.com/github/codeql-action/issues/2117
+  actions: read
+  # Require writing security events to upload SARIF file to security tab
+  security-events: write
+  # Only need to read contents
   contents: read
 
 jobs:
-  osv-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Run OSV Scanner
-        uses: google/osv-scanner-action@v1
-        with:
-          scan-args: |-
-            -r
-            .
+  scan-scheduled:
+    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.1"
