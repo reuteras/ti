@@ -114,7 +114,6 @@ def main() -> int:
         "MINIFLUX_URL",
         "MINIFLUX_TOKEN",
         "READWISE_TOKEN",
-        "ALIENVAULT_API_KEY",
         "FIRST_EPSS_API_KEY",
         "VIRUSTOTAL_TOKEN",
         "SHODAN_TOKEN",
