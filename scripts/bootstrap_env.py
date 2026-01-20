@@ -38,6 +38,20 @@ def _prompt(key: str, current: str) -> str:
     return value or current
 
 
+def _is_placeholder(value: str) -> bool:
+    cleaned = value.strip().lower()
+    if not cleaned:
+        return True
+    return cleaned.startswith("changeme") or cleaned == "change_me"
+
+
+def _should_prompt(key: str, current: str, example_defaults: dict[str, str]) -> bool:
+    if not current:
+        return True
+    example_value = example_defaults.get(key, "")
+    return example_value == current and _is_placeholder(example_value)
+
+
 def _gen_password() -> str:
     return secrets.token_urlsafe(24)
 
@@ -59,6 +73,7 @@ def main() -> int:
 
     existing = _read_env(env_path)
     example_items = _parse_example(example_path)
+    example_defaults = {key: value for key, value in example_items}
     generated: dict[str, str] = {}
 
     if not env_path.exists():
@@ -114,13 +129,20 @@ def main() -> int:
         "MINIFLUX_URL",
         "MINIFLUX_TOKEN",
         "READWISE_TOKEN",
+        "ALIENVAULT_API_KEY",
         "FIRST_EPSS_API_KEY",
+        "MALPEDIA_AUTH_KEY",
+        "MALWAREBAZAAR_API_KEY",
         "VIRUSTOTAL_TOKEN",
         "SHODAN_TOKEN",
         "ZOTERO_API_KEY",
         "ZOTERO_LIBRARY_ID",
     ]:
-        env_data[key] = _prompt(key, env_data.get(key, ""))
+        current = env_data.get(key, "")
+        if _should_prompt(key, current, example_defaults):
+            env_data[key] = _prompt(key, current)
+        else:
+            env_data[key] = current
 
     lines = []
     for key, value in env_data.items():

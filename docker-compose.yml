@@ -114,6 +114,18 @@ services:
       timeout: 10s
       retries: 10
 
+  opencti-worker:
+    image: opencti/worker:6.9.8
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - WORKER_LOG_LEVEL=${OPENCTI_APP__APP_LOGS__LEVEL:-info}
+    depends_on:
+      opencti:
+        condition: service_healthy
+
   opencti-init:
     build:
       context: services/opencti-init
@@ -248,23 +260,29 @@ services:
       timeout: 5s
       retries: 3
 
-  connector-cve:
-    image: opencti/connector-cve:latest
+  connector-cvelist:
+    build:
+      context: services/connectors
+      dockerfile: cvelist/Dockerfile
     env_file:
       - .env
     environment:
       - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
-      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - CONNECTOR_ID=${CVE_CONNECTOR_ID}
-      - CONNECTOR_TYPE=EXTERNAL_IMPORT
-      - CONNECTOR_NAME=CIRCL CVE
-      - CONNECTOR_SCOPE=vulnerability
-      - CONNECTOR_LOG_LEVEL=info
-      - CONNECTOR_RUN_INTERVAL=3600
-      - CONNECTOR_UPDATE_EXISTING_DATA=true
+      - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CVELIST_REPO_URL=${CVELIST_REPO_URL:-https://github.com/CVEProject/cvelistV5.git}
+      - CVELIST_BRANCH=${CVELIST_BRANCH:-main}
+      - CVELIST_RUN_INTERVAL_SECONDS=${CVELIST_RUN_INTERVAL_SECONDS:-3600}
+    volumes:
+      - cvelist-state:/data
     depends_on:
       opencti:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   connector-cisa-kev:
     image: opencti/connector-cisa-known-exploited-vulnerabilities:latest
@@ -316,6 +334,224 @@ services:
       - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL=3600
       - CONNECTOR_UPDATE_EXISTING_DATA=true
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-alienvault:
+    image: opencti/connector-alienvault:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${ALIENVAULT_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=AlienVault
+      - CONNECTOR_SCOPE=alienvault
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_DURATION_PERIOD=PT30M
+      - ALIENVAULT_BASE_URL=${ALIENVAULT_BASE_URL:-https://otx.alienvault.com}
+      - ALIENVAULT_API_KEY=${ALIENVAULT_API_KEY}
+      - ALIENVAULT_TLP=White
+      - ALIENVAULT_CREATE_OBSERVABLES=true
+      - ALIENVAULT_CREATE_INDICATORS=true
+      - ALIENVAULT_PULSE_START_TIMESTAMP=2020-05-01T00:00:00
+      - ALIENVAULT_REPORT_TYPE=threat-report
+      - ALIENVAULT_REPORT_STATUS=New
+      - ALIENVAULT_GUESS_MALWARE=false
+      - ALIENVAULT_GUESS_CVE=false
+      - ALIENVAULT_EXCLUDED_PULSE_INDICATOR_TYPES=FileHash-MD5,FileHash-SHA1
+      - ALIENVAULT_ENABLE_RELATIONSHIPS=true
+      - ALIENVAULT_ENABLE_ATTACK_PATTERNS_INDICATES=true
+      - ALIENVAULT_DEFAULT_X_OPENCTI_SCORE=50
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-urlhaus:
+    image: opencti/connector-urlhaus:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${URLHAUS_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=Abuse.ch URLhaus
+      - CONNECTOR_SCOPE=urlhaus
+      - CONNECTOR_LOG_LEVEL=info
+      - URLHAUS_INTERVAL=3
+      - URLHAUS_CSV_URL=https://urlhaus.abuse.ch/downloads/csv_recent/
+      - URLHAUS_DEFAULT_X_OPENCTI_SCORE=80
+      - URLHAUS_IMPORT_OFFLINE=true
+      - URLHAUS_THREATS_FROM_LABELS=true
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-ransomwarelive:
+    image: opencti/connector-ransomwarelive:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${RANSOMWARELIVE_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=Ransomware Connector
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_DURATION_PERIOD=PT10M
+      - CONNECTOR_PULL_HISTORY=false
+      - CONNECTOR_HISTORY_START_YEAR=2023
+      - CONNECTOR_CREATE_THREAT_ACTOR=false
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-montysecurity-c2-tracker:
+    image: opencti/connector-montysecurity-c2-tracker:latest
+    env_file:
+      - .env
+    environment:
+      - opencti_url=${OPENCTI_URL:-http://opencti:8080}
+      - opencti_c2tracker_token=${MONTYSECURITY_C2TRACKER_TOKEN}
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-malpedia:
+    image: opencti/connector-malpedia:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${MALPEDIA_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=Malpedia
+      - CONNECTOR_SCOPE=malpedia
+      - CONNECTOR_LOG_LEVEL=error
+      - CONNECTOR_DURATION_PERIOD=PT24H
+      - MALPEDIA_AUTH_KEY=${MALPEDIA_AUTH_KEY}
+      - MALPEDIA_IMPORT_INTRUSION_SETS=true
+      - MALPEDIA_IMPORT_YARA=true
+      - MALPEDIA_CREATE_INDICATORS=true
+      - MALPEDIA_CREATE_OBSERVABLES=true
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-malwarebazaar:
+    image: opencti/connector-malwarebazaar:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${MALWAREBAZAAR_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=MalwareBazaar
+      - CONNECTOR_SCOPE=StixFile
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_DURATION_PERIOD=PT50M
+      - MALWAREBAZAAR_API_BASE_URL=https://mb-api.abuse.ch/api/v1/
+      - MALWAREBAZAAR_API_KEY=${MALWAREBAZAAR_API_KEY}
+      - MALWAREBAZAAR_TLP_LEVEL=clear
+      - MALWAREBAZAAR_X_OPENCTI_SCORE=100
+      - MALWAREBAZAAR_INCLUDE_TAGS=exe,dll,docm,docx,doc,xls,xlsx,xlsm,js
+      - MALWAREBAZAAR_INCLUDE_REPORTERS=
+      - MALWAREBAZAAR_LABELS=malware-bazaar
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-abuse-ssl:
+    image: opencti/connector-abuse-ssl:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${ABUSESSL_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=Abuse.ch SSL Blacklist
+      - CONNECTOR_SCOPE=abusessl
+      - CONNECTOR_LOG_LEVEL=info
+      - ABUSESSL_URL=https://sslbl.abuse.ch/blacklist/sslipblacklist.csv
+      - ABUSESSL_INTERVAL=360
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-yara:
+    image: opencti/connector-yara:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${YARA_CONNECTOR_ID}
+      - CONNECTOR_TYPE=INTERNAL_ENRICHMENT
+      - CONNECTOR_NAME=YARA
+      - CONNECTOR_SCOPE=Artifact
+      - CONNECTOR_AUTO=true
+      - CONNECTOR_CONFIDENCE_LEVEL=80
+      - CONNECTOR_LOG_LEVEL=info
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-misp-feed:
+    image: opencti/connector-misp-feed:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${MISP_FEED_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=MISP Feed
+      - CONNECTOR_SCOPE=misp-feed
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_DURATION_PERIOD=PT1H
+      - MISP_FEED_SOURCE_TYPE=url
+      - MISP_FEED_URL=${MISP_FEED_URL}
+      - MISP_FEED_SSL_VERIFY=true
+      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
+      - MISP_FEED_CREATE_REPORTS=true
+      - MISP_FEED_REPORT_TYPE=misp-event
+      - MISP_FEED_CREATE_INDICATORS=true
+      - MISP_FEED_CREATE_OBSERVABLES=true
+      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
+      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-misp-feed-botvrij:
+    image: opencti/connector-misp-feed:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${MISP_FEED_BOTVRIJ_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=MISP Feed Botvrij
+      - CONNECTOR_SCOPE=misp-feed
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_DURATION_PERIOD=PT1H
+      - MISP_FEED_SOURCE_TYPE=url
+      - MISP_FEED_URL=${MISP_FEED_BOTVRIJ_URL}
+      - MISP_FEED_SSL_VERIFY=true
+      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
+      - MISP_FEED_CREATE_REPORTS=true
+      - MISP_FEED_REPORT_TYPE=misp-event
+      - MISP_FEED_CREATE_INDICATORS=true
+      - MISP_FEED_CREATE_OBSERVABLES=true
+      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
+      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
     depends_on:
       opencti:
         condition: service_healthy
@@ -425,3 +661,4 @@ volumes:
   miniflux-state:
   readwise-state:
   zotero-state:
+  cvelist-state:

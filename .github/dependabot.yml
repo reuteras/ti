@@ -13,6 +13,10 @@ updates:
     schedule:
       interval: "weekly"
   - package-ecosystem: "uv"
+    directory: "/services/connectors/cvelist"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "uv"
     directory: "/services/connectors/miniflux"
     schedule:
       interval: "weekly"

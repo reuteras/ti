@@ -8,6 +8,7 @@ Personal Threat Intel platform:
   - Miniflux (RSS)
   - Readwise / Readwise Reader
   - Zotero (docs/PDFs/notes)
+- Official OpenCTI connectors for public data and enrichment (AlienVault OTX, URLhaus, ThreatFox, Abuse.ch SSL, MalwareBazaar, Malpedia, Montysecurity C2-Tracker, RansomwareLive, CISA KEV, EPSS, VirusTotal, Shodan, OpenCTI Datasets, YARA, MISP Feed, CVE List V5)
 - A "briefing service" that:
   - queries OpenCTI for new intel since last run
   - produces a daily briefing (HTML + RSS/Atom)
@@ -18,6 +19,7 @@ Personal Threat Intel platform:
 - TheHive/Cortex (license constraints)
 - MISP (maybe later)
 - Full-blown SOC case management workflows
+- NVD connector (not used; CVE coverage is via CISA KEV + OpenCTI Datasets)
 
 ## Quickstart (dev)
 1) Copy `.env.example` to `.env` and fill required values.

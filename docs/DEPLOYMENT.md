@@ -3,7 +3,9 @@
 ## Goals
 - One `docker-compose.yml` that runs:
   - OpenCTI stack
-  - 3 connectors
+  - OpenCTI worker (queue ingestion)
+  - core connectors (miniflux/readwise/zotero)
+  - external enrichment/import connectors
   - briefing service
 
 ## Notes
@@ -28,3 +30,4 @@
 - OpenCTI UI reachable on localhost:8080
 - briefing service reachable on localhost:8088
 - connectors run and log successful auth + "no new items" when empty
+- external connectors start cleanly (CISA KEV, EPSS, OpenCTI Datasets, OTX, ThreatFox, VirusTotal, Shodan)

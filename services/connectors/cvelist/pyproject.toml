@@ -1,0 +1,19 @@
+[project]
+name = "connector-cvelist"
+version = "0.1.0"
+description = "CVE List V5 connector"
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.27.0",
+  "connectors-common",
+]
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/connector_cvelist"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

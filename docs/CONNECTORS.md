@@ -44,6 +44,27 @@ For each source item:
   - Domain-Name, Url, IPv4-Addr, IPv6-Addr, File (hashes), Email-Addr
   - Link Report -> Observable ("related-to")
 
+## External OpenCTI connectors
+The stack also runs official OpenCTI connectors for public datasets and enrichment:
+- AlienVault OTX
+- Abuse.ch SSL Blacklist
+- Abuse.ch ThreatFox
+- Abuse.ch URLhaus
+- CISA KEV (exploited CVEs)
+- FIRST EPSS (CVSS exploitability probability)
+- MalwareBazaar
+- Malpedia
+- Montysecurity C2-Tracker
+- MISP Feed (CIRCL OSINT)
+- OpenCTI Datasets
+- RansomwareLive
+- VirusTotal
+- Shodan InternetDB
+- Shodan
+- YARA (internal enrichment)
+
+Note: NVD is not used; CVE coverage comes primarily from CISA KEV + OpenCTI Datasets.
+
 ## Miniflux connector
 ### Inputs
 - MINIFLUX_URL
@@ -82,3 +103,9 @@ For each source item:
 - It ingests at least one real item and creates:
   - Report + ExternalReference + at least one observable or CVE if present
 - Re-running does not create duplicates.
+
+## CVE List V5 connector
+Imports CVE entries from the CVEProject `cvelistV5` repository.
+- Pulls the Git repository and processes updated CVE JSON files.
+- Creates or updates Vulnerability objects and attaches external references.
+- Runs hourly by default (`CVELIST_RUN_INTERVAL_SECONDS=3600`).
