@@ -27,9 +27,19 @@ class _TextExtractor(HTMLParser):
             self._chunks.append("\n")
 
     def get_text(self) -> str:
-        text = " ".join(self._chunks)
+        text = "".join(self._chunks)
         lines = [" ".join(part.split()) for part in text.splitlines()]
-        return "\n".join(line for line in lines if line)
+        normalized: list[str] = []
+        blank_run = 0
+        for line in lines:
+            if not line:
+                blank_run += 1
+                if blank_run <= 2:
+                    normalized.append("")
+                continue
+            blank_run = 0
+            normalized.append(line)
+        return "\n".join(normalized).strip()
 
 
 def html_to_text(value: str) -> str:

@@ -19,6 +19,7 @@ class ReportInput:
     source_name: str
     source_url: str | None
     author: str | None = None
+    created_by_id: str | None = None
     labels: list[str] | None = None
     confidence: int | None = None
     external_id: str | None = None
@@ -56,6 +57,7 @@ class OpenCTIClient:
         self.fallback_token = fallback_token or ""
         self._external_refs_supported = True
         self._observables_supported = True
+        self._label_cache: dict[str, str] = {}
 
     def _post_with_token(self, token: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}/graphql"
@@ -188,6 +190,134 @@ class OpenCTIClient:
             return None
         return data.get("vulnerabilityAdd", {}).get("id")
 
+    def _find_entity_id(self, list_field: str, name: str) -> str | None:
+        query = f"""
+        query EntityByName($name: Any!) {{
+          {list_field}(
+            filters: {{mode: and, filterGroups: [], filters: [{{key: "name", values: [$name]}}]}}
+            first: 1
+          ) {{
+            edges {{ node {{ id }} }}
+          }}
+        }}
+        """
+        try:
+            data = self._post(query, {"name": name})
+        except Exception as exc:
+            logger.warning("opencti_entity_find_failed error=%s", exc)
+            return None
+        edges = data.get(list_field, {}).get("edges", [])
+        if edges:
+            return edges[0].get("node", {}).get("id")
+        return None
+
+    def create_malware(self, name: str) -> str | None:
+        if not self.admin_token:
+            return None
+        existing = self._find_entity_id("malwares", name)
+        if existing:
+            return existing
+        mutation = """
+        mutation MalwareAdd($input: MalwareAddInput!) {
+          malwareAdd(input: $input) { id }
+        }
+        """
+        try:
+            data = self._post(mutation, {"input": {"name": name}})
+        except Exception as exc:
+            logger.warning("opencti_malware_add_failed error=%s", exc)
+            return None
+        return data.get("malwareAdd", {}).get("id")
+
+    def create_identity(self, name: str, identity_type: str = "Individual") -> str | None:
+        if not self.admin_token:
+            return None
+        existing = self._find_entity_id("identities", name)
+        if existing:
+            return existing
+        mutation = """
+        mutation IdentityAdd($input: IdentityAddInput!) {
+          identityAdd(input: $input) { id }
+        }
+        """
+        payload = {"name": name, "type": identity_type}
+        try:
+            data = self._post(mutation, {"input": payload})
+        except Exception as exc:
+            logger.warning("opencti_identity_add_failed error=%s", exc)
+            return None
+        return data.get("identityAdd", {}).get("id")
+
+    def update_identity_name(self, identity_id: str, name: str) -> None:
+        if not self.admin_token or not identity_id or not name:
+            return
+        mutation = """
+        mutation IdentityEdit($id: ID!, $input: [EditInput]!) {
+          stixDomainObjectEdit(id: $id) {
+            fieldPatch(input: $input) { id }
+          }
+        }
+        """
+        payload = [{"key": "name", "value": [name]}]
+        try:
+            self._post(mutation, {"id": identity_id, "input": payload})
+        except Exception as exc:
+            logger.warning("opencti_identity_update_failed error=%s", exc)
+
+    def create_tool(self, name: str) -> str | None:
+        if not self.admin_token:
+            return None
+        existing = self._find_entity_id("tools", name)
+        if existing:
+            return existing
+        mutation = """
+        mutation ToolAdd($input: ToolAddInput!) {
+          toolAdd(input: $input) { id }
+        }
+        """
+        try:
+            data = self._post(mutation, {"input": {"name": name}})
+        except Exception as exc:
+            logger.warning("opencti_tool_add_failed error=%s", exc)
+            return None
+        return data.get("toolAdd", {}).get("id")
+
+    def create_threat_actor(self, name: str) -> str | None:
+        if not self.admin_token:
+            return None
+        existing = self._find_entity_id("threatActors", name)
+        if existing:
+            return existing
+        mutation = """
+        mutation ThreatActorAdd($input: ThreatActorAddInput!) {
+          threatActorAdd(input: $input) { id }
+        }
+        """
+        try:
+            data = self._post(mutation, {"input": {"name": name}})
+        except Exception as exc:
+            logger.warning("opencti_threat_actor_add_failed error=%s", exc)
+            return None
+        return data.get("threatActorAdd", {}).get("id")
+
+    def create_attack_pattern(self, name: str) -> str | None:
+        if not self.admin_token:
+            return None
+        existing = self._find_entity_id("attackPatterns", name)
+        if existing:
+            return existing
+        mutation = """
+        mutation AttackPatternAdd($input: AttackPatternAddInput!) {
+          attackPatternAdd(input: $input) { id }
+        }
+        """
+        try:
+            data = self._post(mutation, {"input": {"name": name}})
+        except Exception as exc:
+            logger.warning("opencti_attack_pattern_add_failed error=%s", exc)
+            return None
+        return data.get("attackPatternAdd", {}).get("id")
+
     def create_observable(self, obs_type: str, value: str) -> str | None:
         if not self.admin_token:
             return None
@@ -249,8 +379,17 @@ class OpenCTIClient:
         input_payload["published"] = normalized_published
         if report.confidence is not None:
             input_payload["confidence"] = report.confidence
+        created_by_id = getattr(report, "created_by_id", None)
+        if created_by_id:
+            input_payload["createdBy"] = created_by_id
+        elif report.author:
+            author_id = self.create_identity(report.author)
+            if author_id:
+                input_payload["createdBy"] = author_id
         if report.labels:
-            input_payload["objectLabel"] = report.labels
+            label_ids = self._ensure_label_ids(report.labels)
+            if label_ids:
+                input_payload["objectLabel"] = label_ids
         # External references are added after creation to avoid schema mismatches.
         try:
             data = self._post(mutation, {"input": input_payload})
@@ -272,6 +411,33 @@ class OpenCTIClient:
                 report_id, report.source_name, report.source_url, report.external_id
             )
         return report_id
+
+    def _ensure_label_ids(self, labels: list[str]) -> list[str]:
+        label_ids: list[str] = []
+        for value in labels:
+            label = value.strip()
+            if not label:
+                continue
+            cached = self._label_cache.get(label)
+            if cached:
+                label_ids.append(cached)
+                continue
+            mutation = """
+            mutation LabelAdd($input: LabelAddInput!) {
+              labelAdd(input: $input) { id value }
+            }
+            """
+            payload = {"value": label, "update": True}
+            try:
+                data = self._post(mutation, {"input": payload})
+                node = data.get("labelAdd") or {}
+                label_id = node.get("id")
+                if label_id:
+                    self._label_cache[label] = label_id
+                    label_ids.append(label_id)
+            except Exception as exc:
+                logger.warning("opencti_label_add_failed label=%s error=%s", label, exc)
+        return label_ids
 
 
 def _normalize_published(value: str | None) -> str | None:

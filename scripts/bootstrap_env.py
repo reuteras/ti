@@ -118,8 +118,10 @@ def main() -> int:
                 handle.write(f"{key}={value}\n")
 
     env_data = _read_env(env_path)
-    if not env_data.get("OPENCTI_ADMIN_TOKEN") and env_data.get("OPENCTI_APP__ADMIN__TOKEN"):
-        env_data["OPENCTI_ADMIN_TOKEN"] = env_data["OPENCTI_APP__ADMIN__TOKEN"]
+    if env_data.get("OPENCTI_APP__ADMIN__TOKEN"):
+        admin_token = env_data.get("OPENCTI_ADMIN_TOKEN", "").strip()
+        if not admin_token or admin_token == "changeme":
+            env_data["OPENCTI_ADMIN_TOKEN"] = env_data["OPENCTI_APP__ADMIN__TOKEN"]
     for key in [
         "OPENCTI_APP__ADMIN__EMAIL",
         "OPENCTI_APP__ADMIN__PASSWORD",
