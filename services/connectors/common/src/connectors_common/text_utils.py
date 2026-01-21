@@ -1,5 +1,6 @@
 from html.parser import HTMLParser
 import logging
+import re
 
 try:
     import trafilatura
@@ -40,6 +41,37 @@ class _TextExtractor(HTMLParser):
             blank_run = 0
             normalized.append(line)
         return "\n".join(normalized).strip()
+
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\\s+(?=[A-Z])")
+
+
+def format_readable_text(value: str, max_paragraph_chars: int = 700, sentences_per_paragraph: int = 3) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    paragraphs = [part.strip() for part in text.split("\n\n") if part.strip()]
+    if not paragraphs:
+        return text
+    rebuilt: list[str] = []
+    for paragraph in paragraphs:
+        if len(paragraph) <= max_paragraph_chars:
+            rebuilt.append(paragraph)
+            continue
+        sentences = [part.strip() for part in _SENTENCE_SPLIT.split(paragraph) if part.strip()]
+        if len(sentences) <= 1:
+            rebuilt.append(paragraph)
+            continue
+        chunk: list[str] = []
+        for sentence in sentences:
+            chunk.append(sentence)
+            if len(chunk) >= sentences_per_paragraph:
+                rebuilt.append(" ".join(chunk))
+                rebuilt.append("")
+                chunk = []
+        if chunk:
+            rebuilt.append(" ".join(chunk))
+    return "\n\n".join(part for part in rebuilt if part != "").strip()
 
 
 def html_to_text(value: str) -> str:

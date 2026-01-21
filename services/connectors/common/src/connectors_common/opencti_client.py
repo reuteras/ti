@@ -57,6 +57,8 @@ class OpenCTIClient:
         self.fallback_token = fallback_token or ""
         self._external_refs_supported = True
         self._observables_supported = True
+        self._software_supported = True
+        self._country_supported = True
         self._label_cache: dict[str, str] = {}
 
     def _post_with_token(self, token: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
@@ -264,6 +266,104 @@ class OpenCTIClient:
         except Exception as exc:
             logger.warning("opencti_identity_update_failed error=%s", exc)
 
+    def create_software(self, name: str) -> str | None:
+        if not self.admin_token or not self._software_supported:
+            return None
+        query = """
+        query SoftwareByName($name: Any!) {
+          stixCoreObjects(
+            filters: {
+              mode: and,
+              filterGroups: [],
+              filters: [
+                {key: "entity_type", values: ["Software"]},
+                {key: "name", values: [$name]}
+              ]
+            }
+            first: 1
+          ) {
+            edges { node { id } }
+          }
+        }
+        """
+        try:
+            data = self._post(query, {"name": name})
+            edges = data.get("stixCoreObjects", {}).get("edges", [])
+            if edges:
+                return edges[0].get("node", {}).get("id")
+        except Exception as exc:
+            if "stixCoreObjects" in str(exc) or "GRAPHQL_VALIDATION_FAILED" in str(exc):
+                self._software_supported = False
+                logger.warning("opencti_software_disabled")
+                return None
+            logger.warning("opencti_software_find_failed error=%s", exc)
+            return None
+
+        mutation = """
+        mutation SoftwareAdd($input: SoftwareAddInput!) {
+          softwareAdd(input: $input) { id }
+        }
+        """
+        try:
+            data = self._post(mutation, {"input": {"name": name}})
+        except Exception as exc:
+            if "softwareAdd" in str(exc) or "GRAPHQL_VALIDATION_FAILED" in str(exc):
+                self._software_supported = False
+                logger.warning("opencti_software_disabled")
+                return None
+            logger.warning("opencti_software_add_failed error=%s", exc)
+            return None
+        return data.get("softwareAdd", {}).get("id")
+
+    def create_country(self, name: str) -> str | None:
+        if not self.admin_token or not self._country_supported:
+            return None
+        query = """
+        query CountryByName($name: Any!) {
+          stixCoreObjects(
+            filters: {
+              mode: and,
+              filterGroups: [],
+              filters: [
+                {key: "entity_type", values: ["Country"]},
+                {key: "name", values: [$name]}
+              ]
+            }
+            first: 1
+          ) {
+            edges { node { id } }
+          }
+        }
+        """
+        try:
+            data = self._post(query, {"name": name})
+            edges = data.get("stixCoreObjects", {}).get("edges", [])
+            if edges:
+                return edges[0].get("node", {}).get("id")
+        except Exception as exc:
+            if "stixCoreObjects" in str(exc) or "GRAPHQL_VALIDATION_FAILED" in str(exc):
+                self._country_supported = False
+                logger.warning("opencti_country_disabled")
+                return None
+            logger.warning("opencti_country_find_failed error=%s", exc)
+            return None
+
+        mutation = """
+        mutation CountryAdd($input: CountryAddInput!) {
+          countryAdd(input: $input) { id }
+        }
+        """
+        try:
+            data = self._post(mutation, {"input": {"name": name}})
+        except Exception as exc:
+            if "countryAdd" in str(exc) or "GRAPHQL_VALIDATION_FAILED" in str(exc):
+                self._country_supported = False
+                logger.warning("opencti_country_disabled")
+                return None
+            logger.warning("opencti_country_add_failed error=%s", exc)
+            return None
+        return data.get("countryAdd", {}).get("id")
+
     def create_tool(self, name: str) -> str | None:
         if not self.admin_token:
             return None
@@ -323,13 +423,30 @@ class OpenCTIClient:
             return None
         if not self._observables_supported:
             return None
-        mutation = """
+        input_mutation = """
+        mutation ObservableAdd($input: StixCyberObservableAddInput!) {
+          stixCyberObservableAdd(input: $input) { id }
+        }
+        """
+        try:
+            data = self._post(input_mutation, {"input": {"type": obs_type, "value": value}})
+            return data.get("stixCyberObservableAdd", {}).get("id")
+        except Exception as exc:
+            if "Unknown argument \"input\"" not in str(exc) and "StixCyberObservableAddInput" not in str(exc):
+                if "Unknown argument" in str(exc) or "stixCyberObservableAdd" in str(exc):
+                    self._observables_supported = False
+                    logger.warning("opencti_observable_add_disabled")
+                    return None
+                logger.warning("opencti_observable_add_failed error=%s", exc)
+                return None
+
+        legacy_mutation = """
         mutation ObservableAdd($type: String!, $value: String!) {
           stixCyberObservableAdd(type: $type, value: $value) { id }
         }
         """
         try:
-            data = self._post(mutation, {"type": obs_type, "value": value})
+            data = self._post(legacy_mutation, {"type": obs_type, "value": value})
         except Exception as exc:
             if "Unknown argument" in str(exc) or "stixCyberObservableAdd" in str(exc):
                 self._observables_supported = False
@@ -367,6 +484,8 @@ class OpenCTIClient:
         description_lines = [report.description.strip()] if report.description else []
         if report.author:
             description_lines.append(f"Author: {report.author}")
+        if report.source_url:
+            description_lines.append(f"Source: {report.source_url}")
         description = "\n\n".join(line for line in description_lines if line)
         normalized_published = _normalize_published(report.published)
         if not normalized_published:

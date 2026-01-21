@@ -1,7 +1,8 @@
+import hashlib
+import ipaddress
 import logging
 import os
 import time
-import hashlib
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 
@@ -11,14 +12,28 @@ from pycti import OpenCTIConnectorHelper
 from connectors_common.dedup import find_best_match, prepare_candidates
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
 from connectors_common.enrichment import apply_label_rules, source_confidence, source_labels
-from connectors_common.extractors import extract_cves, extract_label_entities, extract_iocs
+from connectors_common.extractors import (
+    extract_cves,
+    extract_label_entities,
+    extract_iocs,
+    extract_organizations,
+    extract_products,
+)
 from connectors_common.state_store import StateStore
-from connectors_common.llm import summarize_text
-from connectors_common.text_utils import extract_main_text
+from connectors_common.llm import summarize_text, extract_entities
+from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.url_utils import canonicalize_url, url_hash
 
 logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _observable_type_for_ip(value: str) -> str:
+    try:
+        return "IPv6-Addr" if ipaddress.ip_address(value).version == 6 else "IPv4-Addr"
+    except ValueError:
+        return "IPv4-Addr"
+
 
 def _select_opencti_token() -> str:
     use_connector_token = os.getenv("OPENCTI_USE_CONNECTOR_TOKEN", "").lower() == "true"
@@ -202,11 +217,19 @@ class ZoteroConnector:
                 continue
 
             text = extract_main_text(data.get("abstractNote") or "")
+            text = format_readable_text(text)
             summary = summarize_text(text)
             if summary:
                 text = f"{text}\n\nSummary:\n{summary}"
             cves = extract_cves(text)
             iocs = extract_iocs(text)
+            orgs = extract_organizations(text)
+            products = extract_products(text)
+            entities = extract_entities(text)
+            people = entities.get("persons", [])
+            orgs = sorted(set(orgs).union(entities.get("organizations", [])))
+            products = sorted(set(products).union(entities.get("products", [])))
+            iocs["countries"] = sorted(set(iocs["countries"]).union(entities.get("countries", [])))
             labels = ["source:zotero"] + source_labels("zotero")
             labels += [f"cve:{cve}" for cve in cves]
             labels += [f"ioc:url" for _ in iocs["urls"]]
@@ -218,6 +241,10 @@ class ZoteroConnector:
             iocs["urls"] = sorted(set(iocs["urls"]).union(label_entities["urls"]))
             iocs["domains"] = sorted(set(iocs["domains"]).union(label_entities["domains"]))
             iocs["ipv4"] = sorted(set(iocs["ipv4"]).union(label_entities["ipv4"]))
+            iocs["asns"] = sorted(set(iocs["asns"]).union(label_entities["asns"]))
+            iocs["countries"] = sorted(set(iocs["countries"]).union(label_entities["countries"]))
+            orgs = sorted(set(orgs).union(label_entities["organizations"]))
+            products = sorted(set(products).union(label_entities["products"]))
 
             creators = data.get("creators") or []
             author = None
@@ -280,9 +307,29 @@ class ZoteroConnector:
                     if obs_id:
                         self.client.create_relationship(report_id, obs_id, "related-to")
                 for ip in iocs["ipv4"]:
-                    obs_id = self.client.create_observable("IPv4-Addr", ip)
+                    obs_id = self.client.create_observable(_observable_type_for_ip(ip), ip)
                     if obs_id:
                         self.client.create_relationship(report_id, obs_id, "related-to")
+                for asn in iocs["asns"]:
+                    obs_id = self.client.create_observable("Autonomous-System", asn)
+                    if obs_id:
+                        self.client.create_relationship(report_id, obs_id, "related-to")
+                for country in iocs["countries"]:
+                    country_id = self.client.create_country(country)
+                    if country_id:
+                        self.client.create_relationship(report_id, country_id, "related-to")
+                for person in people:
+                    person_id = self.client.create_identity(person, "Individual")
+                    if person_id:
+                        self.client.create_relationship(report_id, person_id, "related-to")
+                for name in orgs:
+                    org_entity = self.client.create_identity(name, "Organization")
+                    if org_entity:
+                        self.client.create_relationship(report_id, org_entity, "related-to")
+                for name in products:
+                    software_id = self.client.create_software(name)
+                    if software_id:
+                        self.client.create_relationship(report_id, software_id, "related-to")
                 for name in label_entities["malware"]:
                     malware_id = self.client.create_malware(name)
                     if malware_id:

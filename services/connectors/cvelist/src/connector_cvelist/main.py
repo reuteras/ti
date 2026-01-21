@@ -185,6 +185,17 @@ def _load_epss_scores(path: Path) -> dict[str, dict[str, float]]:
     return scores
 
 
+def _cvss_score_to_opencti(score: Any) -> int | None:
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return None
+    if value <= 10:
+        value = value * 10
+    value = max(0, min(100, round(value)))
+    return int(value)
+
+
 def _extract_cvss(containers: Iterable[dict[str, Any]]) -> dict[str, Any]:
     for container in containers:
         metrics = container.get("metrics") if isinstance(container, dict) else None
@@ -200,6 +211,7 @@ def _extract_cvss(containers: Iterable[dict[str, Any]]) -> dict[str, Any]:
                         "x_opencti_cvss_vector_string": cvss.get("vectorString"),
                         "x_opencti_cvss_base_score": cvss.get("baseScore"),
                         "x_opencti_cvss_base_severity": cvss.get("baseSeverity"),
+                        "x_opencti_score": _cvss_score_to_opencti(cvss.get("baseScore")),
                         "x_opencti_cvss_attack_vector": cvss.get("attackVector"),
                         "x_opencti_cvss_attack_complexity": cvss.get("attackComplexity"),
                         "x_opencti_cvss_privileges_required": cvss.get("privilegesRequired"),
@@ -215,6 +227,7 @@ def _extract_cvss(containers: Iterable[dict[str, Any]]) -> dict[str, Any]:
                     "x_opencti_cvss_v4_vector_string": cvss4.get("vectorString"),
                     "x_opencti_cvss_v4_base_score": cvss4.get("baseScore"),
                     "x_opencti_cvss_v4_base_severity": cvss4.get("baseSeverity"),
+                    "x_opencti_score": _cvss_score_to_opencti(cvss4.get("baseScore")),
                 }
                 for key, field in (
                     ("attackVector", "x_opencti_cvss_v4_attack_vector"),
@@ -497,13 +510,29 @@ class OpenCTIClient:
     def create_observable(self, obs_type: str, value: str) -> str | None:
         if not self._observables_supported:
             return None
-        mutation = """
+        input_mutation = """
+        mutation ObservableAdd($input: StixCyberObservableAddInput!) {
+          stixCyberObservableAdd(input: $input) { id }
+        }
+        """
+        try:
+            data = self._post(input_mutation, {"input": {"type": obs_type, "value": value}})
+            return data.get("stixCyberObservableAdd", {}).get("id")
+        except Exception as exc:
+            if "Unknown argument \"input\"" not in str(exc) and "StixCyberObservableAddInput" not in str(exc):
+                if "Unknown argument" in str(exc) or "stixCyberObservableAdd" in str(exc):
+                    self._observables_supported = False
+                    return None
+                logger.warning("cvelist_observable_add_failed error=%s", exc)
+                return None
+
+        legacy_mutation = """
         mutation ObservableAdd($type: String!, $value: String!) {
           stixCyberObservableAdd(type: $type, value: $value) { id }
         }
         """
         try:
-            data = self._post(mutation, {"type": obs_type, "value": value})
+            data = self._post(legacy_mutation, {"type": obs_type, "value": value})
         except Exception as exc:
             if "Unknown argument" in str(exc) or "stixCyberObservableAdd" in str(exc):
                 self._observables_supported = False

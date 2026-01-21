@@ -42,6 +42,6 @@ Connectors can optionally call a local LLM endpoint to append short summaries to
 2) Set in `.env`:
    - `ENRICHMENT_LLM_ENABLED=true`
    - `ENRICHMENT_LLM_ENDPOINT=http://host.docker.internal:11434/api/generate`
-   - `ENRICHMENT_LLM_MODEL=llama3.1`
+   - `ENRICHMENT_LLM_MODEL=phi3:mini`
 
 You can point `ENRICHMENT_LLM_ENDPOINT` to any compatible HTTP endpoint (local or container).

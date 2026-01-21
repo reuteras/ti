@@ -7,6 +7,224 @@ DOMAIN_PATTERN = re.compile(r"\b([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b")
 URL_PATTERN = re.compile(r"https?://[^\s)\]]+")
 SHA256_PATTERN = re.compile(r"\b[a-fA-F0-9]{64}\b")
 MD5_PATTERN = re.compile(r"\b[a-fA-F0-9]{32}\b")
+ASN_PATTERN = re.compile(r"\bAS\d{1,10}\b", re.IGNORECASE)
+
+_COUNTRY_ALIASES = {
+    "u.s.": "United States",
+    "u.s.a.": "United States",
+    "usa": "United States",
+    "us": "United States",
+    "uk": "United Kingdom",
+    "u.k.": "United Kingdom",
+    "uae": "United Arab Emirates",
+    "russia": "Russia",
+    "south korea": "South Korea",
+    "north korea": "North Korea",
+}
+
+_COUNTRY_NAMES = [
+    "Afghanistan",
+    "Albania",
+    "Algeria",
+    "Andorra",
+    "Angola",
+    "Antigua and Barbuda",
+    "Argentina",
+    "Armenia",
+    "Australia",
+    "Austria",
+    "Azerbaijan",
+    "Bahamas",
+    "Bahrain",
+    "Bangladesh",
+    "Barbados",
+    "Belarus",
+    "Belgium",
+    "Belize",
+    "Benin",
+    "Bhutan",
+    "Bolivia",
+    "Bosnia and Herzegovina",
+    "Botswana",
+    "Brazil",
+    "Brunei",
+    "Bulgaria",
+    "Burkina Faso",
+    "Burundi",
+    "Cambodia",
+    "Cameroon",
+    "Canada",
+    "Cape Verde",
+    "Central African Republic",
+    "Chad",
+    "Chile",
+    "China",
+    "Colombia",
+    "Comoros",
+    "Congo",
+    "Costa Rica",
+    "Croatia",
+    "Cuba",
+    "Cyprus",
+    "Czech Republic",
+    "Denmark",
+    "Djibouti",
+    "Dominica",
+    "Dominican Republic",
+    "Ecuador",
+    "Egypt",
+    "El Salvador",
+    "Equatorial Guinea",
+    "Eritrea",
+    "Estonia",
+    "Eswatini",
+    "Ethiopia",
+    "Fiji",
+    "Finland",
+    "France",
+    "Gabon",
+    "Gambia",
+    "Georgia",
+    "Germany",
+    "Ghana",
+    "Greece",
+    "Grenada",
+    "Guatemala",
+    "Guinea",
+    "Guinea-Bissau",
+    "Guyana",
+    "Haiti",
+    "Honduras",
+    "Hungary",
+    "Iceland",
+    "India",
+    "Indonesia",
+    "Iran",
+    "Iraq",
+    "Ireland",
+    "Israel",
+    "Italy",
+    "Jamaica",
+    "Japan",
+    "Jordan",
+    "Kazakhstan",
+    "Kenya",
+    "Kiribati",
+    "Kuwait",
+    "Kyrgyzstan",
+    "Laos",
+    "Latvia",
+    "Lebanon",
+    "Lesotho",
+    "Liberia",
+    "Libya",
+    "Liechtenstein",
+    "Lithuania",
+    "Luxembourg",
+    "Madagascar",
+    "Malawi",
+    "Malaysia",
+    "Maldives",
+    "Mali",
+    "Malta",
+    "Marshall Islands",
+    "Mauritania",
+    "Mauritius",
+    "Mexico",
+    "Micronesia",
+    "Moldova",
+    "Monaco",
+    "Mongolia",
+    "Montenegro",
+    "Morocco",
+    "Mozambique",
+    "Myanmar",
+    "Namibia",
+    "Nauru",
+    "Nepal",
+    "Netherlands",
+    "New Zealand",
+    "Nicaragua",
+    "Niger",
+    "Nigeria",
+    "North Macedonia",
+    "Norway",
+    "Oman",
+    "Pakistan",
+    "Palau",
+    "Panama",
+    "Papua New Guinea",
+    "Paraguay",
+    "Peru",
+    "Philippines",
+    "Poland",
+    "Portugal",
+    "Qatar",
+    "Romania",
+    "Russia",
+    "Rwanda",
+    "Saint Kitts and Nevis",
+    "Saint Lucia",
+    "Saint Vincent and the Grenadines",
+    "Samoa",
+    "San Marino",
+    "Sao Tome and Principe",
+    "Saudi Arabia",
+    "Senegal",
+    "Serbia",
+    "Seychelles",
+    "Sierra Leone",
+    "Singapore",
+    "Slovakia",
+    "Slovenia",
+    "Solomon Islands",
+    "Somalia",
+    "South Africa",
+    "South Korea",
+    "South Sudan",
+    "Spain",
+    "Sri Lanka",
+    "Sudan",
+    "Suriname",
+    "Sweden",
+    "Switzerland",
+    "Syria",
+    "Taiwan",
+    "Tajikistan",
+    "Tanzania",
+    "Thailand",
+    "Timor-Leste",
+    "Togo",
+    "Tonga",
+    "Trinidad and Tobago",
+    "Tunisia",
+    "Turkey",
+    "Turkmenistan",
+    "Tuvalu",
+    "Uganda",
+    "Ukraine",
+    "United Arab Emirates",
+    "United Kingdom",
+    "United States",
+    "Uruguay",
+    "Uzbekistan",
+    "Vanuatu",
+    "Vatican City",
+    "Venezuela",
+    "Vietnam",
+    "Yemen",
+    "Zambia",
+    "Zimbabwe",
+    "Hong Kong",
+]
+
+_COUNTRY_TERMS = sorted({name.lower() for name in _COUNTRY_NAMES} | set(_COUNTRY_ALIASES.keys()), key=len, reverse=True)
+COUNTRY_PATTERN = re.compile(r"\b(" + "|".join(re.escape(term) for term in _COUNTRY_TERMS) + r")\b", re.IGNORECASE)
+
+_ORG_SUFFIX_PATTERN = re.compile(
+    r"\b([A-Z][A-Za-z0-9&.\-]*(?:\s+[A-Z][A-Za-z0-9&.\-]*)*\s+(?:Limited|Ltd|Inc|Corp|Corporation|Company|LLC|GmbH|AG|BV|AB|PLC|SAS|SA))\b"
+)
+
 
 
 def extract_cves(text: str) -> list[str]:
@@ -26,12 +244,56 @@ def extract_cves_from_labels(labels: Iterable[str]) -> list[str]:
     return sorted(cves)
 
 
+def extract_asns(text: str) -> list[str]:
+    return sorted({match.upper() for match in ASN_PATTERN.findall(text or "")})
+
+
+def extract_countries(text: str) -> list[str]:
+    matches: set[str] = set()
+    for match in COUNTRY_PATTERN.findall(text or ""):
+        key = match.strip().lower()
+        canonical = _COUNTRY_ALIASES.get(key, match.strip())
+        if canonical:
+            matches.add(canonical)
+    return sorted(matches)
+
+
+def extract_organizations(text: str, keywords: Iterable[str] | None = None) -> list[str]:
+    matches: set[str] = set()
+    text_value = text or ""
+    for match in _ORG_SUFFIX_PATTERN.findall(text_value):
+        matches.add(match.strip())
+    for name in keywords or []:
+        if not name:
+            continue
+        pattern = re.compile(r"\b" + re.escape(name) + r"\b", re.IGNORECASE)
+        if pattern.search(text_value):
+            matches.add(name)
+    return sorted(matches)
+
+
+def extract_products(text: str, keywords: Iterable[str] | None = None) -> list[str]:
+    matches: set[str] = set()
+    text_value = text or ""
+    for name in keywords or []:
+        if not name:
+            continue
+        pattern = re.compile(r"\b" + re.escape(name) + r"\b", re.IGNORECASE)
+        if pattern.search(text_value):
+            matches.add(name)
+    return sorted(matches)
+
+
 def extract_label_entities(labels: Iterable[str]) -> dict[str, list[str]]:
     entries = {
         "cves": set(),
         "urls": set(),
         "domains": set(),
         "ipv4": set(),
+        "asns": set(),
+        "countries": set(),
+        "organizations": set(),
+        "products": set(),
         "malware": set(),
         "tools": set(),
         "threat_actors": set(),
@@ -72,6 +334,26 @@ def extract_label_entities(labels: Iterable[str]) -> dict[str, list[str]]:
             if IPV4_PATTERN.fullmatch(value):
                 entries["ipv4"].add(value)
             continue
+        if lower.startswith("asn:"):
+            value = raw.split(":", 1)[1].strip()
+            if value:
+                entries["asns"].add(value.upper())
+            continue
+        if lower.startswith("country:"):
+            value = raw.split(":", 1)[1].strip()
+            if value:
+                entries["countries"].add(value)
+            continue
+        if lower.startswith("org:") or lower.startswith("organization:"):
+            value = raw.split(":", 1)[1].strip()
+            if value:
+                entries["organizations"].add(value)
+            continue
+        if lower.startswith("product:"):
+            value = raw.split(":", 1)[1].strip()
+            if value:
+                entries["products"].add(value)
+            continue
         if lower.startswith("malware:"):
             value = raw.split(":", 1)[1].strip()
             if value:
@@ -101,6 +383,8 @@ def extract_iocs(text: str) -> dict[str, list[str]]:
         "urls": sorted(set(URL_PATTERN.findall(text))),
         "domains": sorted(set(DOMAIN_PATTERN.findall(text))),
         "ipv4": sorted(set(IPV4_PATTERN.findall(text))),
+        "asns": extract_asns(text),
+        "countries": extract_countries(text),
         "sha256": sorted(set(SHA256_PATTERN.findall(text))),
         "md5": sorted(set(MD5_PATTERN.findall(text))),
     }
