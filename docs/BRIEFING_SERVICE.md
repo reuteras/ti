@@ -14,6 +14,10 @@
 
 ## Endpoints (MVP)
 - GET /health
+- GET /denylist.json
+  - JSON allow users to remove unwanted entities before ingestion
+- GET /denylist
+  - HTML UI to view/edit denylist entries
 - GET /latest
   - HTML page (server-rendered) listing top clusters/stories
 - GET /briefings/daily/today
@@ -50,6 +54,13 @@
 - state table:
   - last_run_timestamp
   - last_opencti_cursor (if needed)
+
+## Denylist
+- Endpoint: `GET /denylist.json`
+- File: `${DENYLIST_PATH:-/data/denylist.json}`
+- Format: either a JSON array of strings or a JSON object with lists per category.
+  - Example object keys: `persons`, `organizations`, `products`, `countries`, `authors`, `all`, `patterns`
+  - `patterns` entries are regex strings (case-insensitive) matched against raw values.
 
 ## Acceptance criteria
 - /feeds/daily.rss returns valid RSS XML and includes a link back to /briefings/daily/today

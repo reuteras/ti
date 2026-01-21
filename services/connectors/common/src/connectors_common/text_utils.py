@@ -89,3 +89,13 @@ def extract_main_text(value: str) -> str:
         return value.strip()
     extracted = trafilatura.extract(value, include_comments=False, include_tables=False)
     return extracted or html_to_text(value)
+
+
+_MARKDOWN_SPECIALS = re.compile(r"([\\\\`*_{}\\[\\]()>#+\\-.!|])")
+
+
+def escape_markdown(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    return _MARKDOWN_SPECIALS.sub(r"\\\\\\1", text)

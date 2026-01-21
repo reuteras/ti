@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import uuid
 from contextvars import ContextVar
 from zoneinfo import ZoneInfo
@@ -63,6 +64,55 @@ def _get_env_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
+
+
+def _load_denylist(path: str) -> list[str] | dict[str, list[str]]:
+    if not path:
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except FileNotFoundError:
+        return []
+    except Exception as exc:
+        logger.warning("denylist_load_failed path=%s error=%s", path, exc)
+        return []
+    if isinstance(payload, list):
+        return [str(item) for item in payload if str(item).strip()]
+    if isinstance(payload, dict):
+        cleaned: dict[str, list[str]] = {}
+        for key, value in payload.items():
+            if not isinstance(value, list):
+                continue
+            cleaned[key] = [str(item) for item in value if str(item).strip()]
+        return cleaned
+    return []
+
+
+def _normalize_denylist(payload: list[str] | dict[str, list[str]]) -> dict[str, list[str]]:
+    if isinstance(payload, list):
+        return {"all": payload}
+    if isinstance(payload, dict):
+        return {key: list(value) for key, value in payload.items() if isinstance(value, list)}
+    return {"all": []}
+
+
+def _save_denylist(path: str, payload: dict[str, list[str]]) -> None:
+    dir_path = os.path.dirname(path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=True, indent=2, sort_keys=True)
+
+
+def _find_invalid_patterns(values: list[str]) -> set[str]:
+    invalid: set[str] = set()
+    for value in values:
+        try:
+            re.compile(value)
+        except re.error:
+            invalid.add(value)
+    return invalid
 
 
 @app.middleware("http")
@@ -153,9 +203,80 @@ async def health() -> str:
     return "ok"
 
 
+@app.get("/denylist.json")
+async def denylist() -> Response:
+    path = os.getenv("DENYLIST_PATH", "/data/denylist.json")
+    payload = _load_denylist(path)
+    return Response(content=json.dumps(payload), media_type="application/json")
+
+
+@app.get("/denylist", response_class=HTMLResponse)
+async def denylist_page() -> str:
+    path = os.getenv("DENYLIST_PATH", "/data/denylist.json")
+    payload = _normalize_denylist(_load_denylist(path))
+    categories = ["all", "persons", "organizations", "products", "countries", "authors", "patterns"]
+    for category in categories:
+        payload.setdefault(category, [])
+    payload = {key: sorted(values) for key, values in payload.items()}
+    invalid_patterns = _find_invalid_patterns(payload.get("patterns", []))
+    template = env.get_template("denylist.html")
+    return template.render(
+        denylist=payload,
+        categories=categories,
+        raw_json=json.dumps(payload, indent=2),
+        invalid_patterns=invalid_patterns,
+    )
+
+
+@app.post("/denylist/add")
+async def denylist_add(request: Request) -> RedirectResponse:
+    path = os.getenv("DENYLIST_PATH", "/data/denylist.json")
+    form = await request.form()
+    category = (form.get("category") or "").strip()
+    value = (form.get("value") or "").strip()
+    if category and value:
+        payload = _normalize_denylist(_load_denylist(path))
+        values = payload.setdefault(category, [])
+        if value not in values:
+            values.append(value)
+        _save_denylist(path, payload)
+    return RedirectResponse("/denylist", status_code=303)
+
+
+@app.post("/denylist/remove")
+async def denylist_remove(request: Request) -> RedirectResponse:
+    path = os.getenv("DENYLIST_PATH", "/data/denylist.json")
+    form = await request.form()
+    category = (form.get("category") or "").strip()
+    value = (form.get("value") or "").strip()
+    if category and value:
+        payload = _normalize_denylist(_load_denylist(path))
+        values = payload.get(category, [])
+        if value in values:
+            payload[category] = [item for item in values if item != value]
+            _save_denylist(path, payload)
+    return RedirectResponse("/denylist", status_code=303)
+
+
+@app.post("/denylist/save")
+async def denylist_save(request: Request) -> RedirectResponse:
+    path = os.getenv("DENYLIST_PATH", "/data/denylist.json")
+    form = await request.form()
+    raw = (form.get("raw_json") or "").strip()
+    if raw:
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return RedirectResponse("/denylist", status_code=303)
+        normalized = _normalize_denylist(payload)
+        _save_denylist(path, normalized)
+    return RedirectResponse("/denylist", status_code=303)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     links = [
+        ("/denylist", "Denylist"),
         ("/miniflux/feeds", "Miniflux feeds"),
         ("/readwise/tags", "Readwise tags"),
         ("/zotero/tags", "Zotero tags"),

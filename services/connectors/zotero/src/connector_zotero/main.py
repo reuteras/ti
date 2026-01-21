@@ -3,6 +3,7 @@ import ipaddress
 import logging
 import os
 import time
+import re
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 
@@ -21,6 +22,7 @@ from connectors_common.extractors import (
 )
 from connectors_common.state_store import StateStore
 from connectors_common.llm import summarize_text, extract_entities
+from connectors_common.denylist import filter_values
 from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.url_utils import canonicalize_url, url_hash
 
@@ -33,6 +35,14 @@ def _observable_type_for_ip(value: str) -> str:
         return "IPv6-Addr" if ipaddress.ip_address(value).version == 6 else "IPv4-Addr"
     except ValueError:
         return "IPv4-Addr"
+
+
+def _split_authors(value: str | None) -> list[str]:
+    if not value:
+        return []
+    parts = [part.strip() for part in re.split(r"[;,]", value) if part.strip()]
+    candidates = parts or [value.strip()]
+    return filter_values(candidates, "persons")
 
 
 def _select_opencti_token() -> str:
@@ -256,10 +266,21 @@ class ZoteroConnector:
                         first = primary.get("firstName") or ""
                         last = primary.get("lastName") or ""
                         author = f"{first} {last}".strip()
+            author_ids: list[str] = []
+            authors = _split_authors(author)
             author_id = None
-            if author:
-                author_key = _author_key("zotero", source_url, author)
-                author_id = self._resolve_author(author_key, author, "Individual")
+            if authors:
+                author = "; ".join(authors)
+                primary = authors[0]
+                author_key = _author_key("zotero", source_url, primary)
+                author_id = self._resolve_author(author_key, primary, "Individual")
+                if author_id:
+                    author_ids.append(author_id)
+                for name in authors[1:]:
+                    extra_key = _author_key("zotero", source_url, name)
+                    extra_id = self._resolve_author(extra_key, name, "Individual")
+                    if extra_id:
+                        author_ids.append(extra_id)
             report = ReportInput(
                 title=data.get("title") or "Zotero item",
                 description=text,
@@ -294,6 +315,8 @@ class ZoteroConnector:
                 logger.info("report_created source=zotero id=%s title=%s", report_id, report.title)
                 if duplicate:
                     self.client.create_relationship(report_id, duplicate.report_id, "related-to")
+                for author_id in author_ids:
+                    self.client.create_relationship(report_id, author_id, "related-to")
                 for cve in cves:
                     vuln_id = self.client.create_vulnerability(cve)
                     if vuln_id:

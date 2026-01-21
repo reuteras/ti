@@ -8,6 +8,8 @@ from typing import Any
 import httpx
 from dateutil import parser as date_parser
 
+from connectors_common.text_utils import escape_markdown
+
 logger = logging.getLogger(__name__)
 
 
@@ -144,38 +146,51 @@ class OpenCTIClient:
             return
         if not self._external_refs_supported:
             return
+        external_ref_id = self._create_external_reference(source_name, url, external_id)
+        if not external_ref_id:
+            return
+        patch = [{"key": "externalReferences", "operation": "add", "value": [external_ref_id]}]
         mutations = [
-            (
-                """
-                mutation ReportEdit($id: ID!, $input: ExternalReferenceAddInput!) {
-                  reportEdit(id: $id) {
-                    externalReferencesAdd(input: $input) { id }
-                  }
-                }
-                """,
-                "reportEdit",
-            ),
-            (
-                """
-                mutation StixEdit($id: ID!, $input: ExternalReferenceAddInput!) {
-                  stixDomainObjectEdit(id: $id) {
-                    externalReferencesAdd(input: $input) { id }
-                  }
-                }
-                """,
-                "stixDomainObjectEdit",
-            ),
+            """
+            mutation ReportEdit($id: ID!, $input: [EditInput]!) {
+              reportEdit(id: $id) {
+                fieldPatch(input: $input) { id }
+              }
+            }
+            """,
+            """
+            mutation StixEdit($id: ID!, $input: [EditInput]!) {
+              stixDomainObjectEdit(id: $id) {
+                fieldPatch(input: $input) { id }
+              }
+            }
+            """,
         ]
-        payload = {"source_name": source_name, "url": url, "external_id": external_id}
-        for mutation, _ in mutations:
+        for mutation in mutations:
             try:
-                self._post(mutation, {"id": report_id, "input": payload})
+                self._post(mutation, {"id": report_id, "input": patch})
                 return
             except Exception as exc:
-                if "externalReferencesAdd" in str(exc):
+                if "externalReferences" in str(exc):
                     self._external_refs_supported = False
                     return
                 continue
+
+    def _create_external_reference(self, source_name: str, url: str, external_id: str | None) -> str | None:
+        if not self.admin_token:
+            return None
+        mutation = """
+        mutation ExternalReferenceAdd($input: ExternalReferenceAddInput!) {
+          externalReferenceAdd(input: $input) { id }
+        }
+        """
+        payload = {"source_name": source_name, "url": url, "external_id": external_id}
+        try:
+            data = self._post(mutation, {"input": payload})
+            return data.get("externalReferenceAdd", {}).get("id")
+        except Exception as exc:
+            logger.warning("opencti_external_reference_add_failed error=%s", exc)
+            return None
 
     def create_vulnerability(self, name: str) -> str | None:
         if not self.admin_token:
@@ -423,20 +438,25 @@ class OpenCTIClient:
             return None
         if not self._observables_supported:
             return None
-        input_mutation = """
-        mutation ObservableAdd($input: StixCyberObservableAddInput!) {
-          stixCyberObservableAdd(input: $input) { id }
+        normalized = obs_type.replace("-", "")
+        field_map = {
+            "IPv4Addr": "IPv4Addr",
+            "IPv6Addr": "IPv6Addr",
+            "DomainName": "DomainName",
+            "Url": "Url",
+            "AutonomousSystem": "AutonomousSystem",
         }
-        """
-        try:
-            data = self._post(input_mutation, {"input": {"type": obs_type, "value": value}})
-            return data.get("stixCyberObservableAdd", {}).get("id")
-        except Exception as exc:
-            if "Unknown argument \"input\"" not in str(exc) and "StixCyberObservableAddInput" not in str(exc):
-                if "Unknown argument" in str(exc) or "stixCyberObservableAdd" in str(exc):
-                    self._observables_supported = False
-                    logger.warning("opencti_observable_add_disabled")
-                    return None
+        field = field_map.get(normalized)
+        if field:
+            input_mutation = f"""
+            mutation ObservableAdd($input: {field}AddInput!) {{
+              stixCyberObservableAdd({field}: $input) {{ id }}
+            }}
+            """
+            try:
+                data = self._post(input_mutation, {"input": {"value": value}})
+                return data.get("stixCyberObservableAdd", {}).get("id")
+            except Exception as exc:
                 logger.warning("opencti_observable_add_failed error=%s", exc)
                 return None
 
@@ -481,11 +501,11 @@ class OpenCTIClient:
           }
         }
         """
-        description_lines = [report.description.strip()] if report.description else []
+        description_lines = [escape_markdown(report.description.strip())] if report.description else []
         if report.author:
-            description_lines.append(f"Author: {report.author}")
+            description_lines.append(f"Author: {escape_markdown(report.author)}")
         if report.source_url:
-            description_lines.append(f"Source: {report.source_url}")
+            description_lines.append(f"Source: {escape_markdown(report.source_url)}")
         description = "\n\n".join(line for line in description_lines if line)
         normalized_published = _normalize_published(report.published)
         if not normalized_published:

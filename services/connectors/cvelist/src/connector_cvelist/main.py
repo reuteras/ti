@@ -484,18 +484,28 @@ class OpenCTIClient:
         if not self._external_refs_supported:
             self._add_reference_observable(vuln_id, url)
             return
-        mutation = """
-        mutation ExternalReferenceAdd($id: ID!, $input: ExternalReferenceAddInput!) {
+        create_mutation = """
+        mutation ExternalReferenceAdd($input: ExternalReferenceAddInput!) {
+          externalReferenceAdd(input: $input) { id }
+        }
+        """
+        patch_mutation = """
+        mutation VulnerabilityEdit($id: ID!, $input: [EditInput]!) {
           stixDomainObjectEdit(id: $id) {
-            externalReferencesAdd(input: $input) { id }
+            fieldPatch(input: $input) { id }
           }
         }
         """
         payload = {"source_name": source_name, "url": url}
         try:
-            self._post(mutation, {"id": vuln_id, "input": payload})
+            data = self._post(create_mutation, {"input": payload})
+            ext_id = data.get("externalReferenceAdd", {}).get("id")
+            if not ext_id:
+                return
+            patch = [{"key": "externalReferences", "operation": "add", "value": [ext_id]}]
+            self._post(patch_mutation, {"id": vuln_id, "input": patch})
         except Exception as exc:
-            if "externalReferencesAdd" in str(exc):
+            if "externalReferences" in str(exc) or "externalReferenceAdd" in str(exc):
                 self._external_refs_supported = False
                 logger.warning("cvelist_external_refs_disabled")
                 self._add_reference_observable(vuln_id, url)
@@ -510,19 +520,25 @@ class OpenCTIClient:
     def create_observable(self, obs_type: str, value: str) -> str | None:
         if not self._observables_supported:
             return None
-        input_mutation = """
-        mutation ObservableAdd($input: StixCyberObservableAddInput!) {
-          stixCyberObservableAdd(input: $input) { id }
+        normalized = obs_type.replace("-", "")
+        field_map = {
+            "IPv4Addr": "IPv4Addr",
+            "IPv6Addr": "IPv6Addr",
+            "DomainName": "DomainName",
+            "Url": "Url",
+            "AutonomousSystem": "AutonomousSystem",
         }
-        """
-        try:
-            data = self._post(input_mutation, {"input": {"type": obs_type, "value": value}})
-            return data.get("stixCyberObservableAdd", {}).get("id")
-        except Exception as exc:
-            if "Unknown argument \"input\"" not in str(exc) and "StixCyberObservableAddInput" not in str(exc):
-                if "Unknown argument" in str(exc) or "stixCyberObservableAdd" in str(exc):
-                    self._observables_supported = False
-                    return None
+        field = field_map.get(normalized)
+        if field:
+            input_mutation = f"""
+            mutation ObservableAdd($input: {field}AddInput!) {{
+              stixCyberObservableAdd({field}: $input) {{ id }}
+            }}
+            """
+            try:
+                data = self._post(input_mutation, {"input": {"value": value}})
+                return data.get("stixCyberObservableAdd", {}).get("id")
+            except Exception as exc:
                 logger.warning("cvelist_observable_add_failed error=%s", exc)
                 return None
 
