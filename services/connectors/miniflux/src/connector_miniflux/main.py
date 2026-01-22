@@ -20,6 +20,7 @@ from connectors_common.state_store import StateStore
 from connectors_common.denylist import filter_values
 from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.url_utils import canonicalize_url, url_hash
+from connectors_common.work import WorkTracker
 
 logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
 logger = logging.getLogger(__name__)
@@ -206,10 +207,13 @@ class MinifluxConnector:
             logger.warning("miniflux_not_configured")
             return
 
+        work = WorkTracker(self.helper, "Miniflux import")
         approved_feed_ids = fetch_approved_feed_ids(self.briefing_url)
         if not approved_feed_ids:
             logger.info("miniflux_no_approved_feeds")
+            work.done("No approved feeds")
             return
+        work.log(f"approved_feeds={len(approved_feed_ids)}")
 
         last_id = int(self.state.get("last_entry_id", 0) or 0)
         last_published_raw = self.state.get("last_published_at")
@@ -226,6 +230,7 @@ class MinifluxConnector:
         offset = 0
         limit = 100
         total_entries = 0
+        processed_entries = 0
 
         while True:
             entries = fetch_entries(self.base_url, self.token, offset, limit)
@@ -234,6 +239,9 @@ class MinifluxConnector:
             total_entries += len(entries)
             reached_cutoff = False
             for entry in entries:
+                processed_entries += 1
+                if processed_entries % 50 == 0:
+                    work.progress(None, f"processed_entries={processed_entries}")
                 entry_id = int(entry.get("id", 0) or 0)
                 feed_id = int(entry.get("feed_id", 0) or 0)
                 if feed_id not in approved_feed_ids:
@@ -371,6 +379,7 @@ class MinifluxConnector:
             self.state.set("last_entry_id", max_entry_id)
             self.state.set("last_published_at", max_published_dt.isoformat())
         logger.info("miniflux_run_completed entries=%s", total_entries)
+        work.done(f"entries={total_entries}")
 
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):

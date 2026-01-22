@@ -1,39 +1,158 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Daily Briefing</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; }
-    .item { margin-bottom: 24px; }
-    .meta { color: #666; font-size: 0.9em; }
-    .watch { color: #b30000; font-weight: bold; }
-  </style>
-</head>
-<body>
-  <h1>Daily Briefing - {{ date }}</h1>
-  {% if items %}
-    {% for item in items %}
-      <div class="item">
-        <h2>{{ item.title }}</h2>
-        <div class="meta">Created: {{ item.created_at }}</div>
-        {% if item.watch_hit %}
-          <div class="watch">Watch alert</div>
-        {% endif %}
-        <p>{{ item.description }}</p>
-        {% if item.source_url %}
-          <div><a href="{{ item.source_url }}">Source</a></div>
-        {% endif %}
-        {% if item.cves %}
-          <div>CVEs: {{ item.cves | join(", ") }}</div>
-        {% endif %}
-        {% if item.observables %}
-          <div>Observables: {{ item.observables | join(", ") }}</div>
-        {% endif %}
-      </div>
-    {% endfor %}
-  {% else %}
-    <p>No items found in this briefing window.</p>
-  {% endif %}
-</body>
+  <head>
+    <meta charset="UTF-8">
+    <title>Daily Briefing</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --ink: #0b1f3a;
+        --muted: #5f6f81;
+        --accent: #2f6feb;
+        --accent-2: #12b5cb;
+        --border: #d9e2ec;
+        --shadow: 0 18px 40px rgba(15, 28, 45, 0.08);
+        --chip-bg: #eef3ff;
+        --chip-ink: #284b9b;
+        --warn: #c0362c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        background: linear-gradient(135deg, #f5f7fb 0%, #eef4ff 35%, #f7f9fc 100%);
+        color: var(--ink);
+      }
+      header {
+        background: radial-gradient(circle at top right, rgba(47, 111, 235, 0.28), transparent 55%), #0b1f3a;
+        color: #f8fafc;
+        padding: 28px 32px;
+      }
+      header .kicker {
+        font-size: 0.75rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: rgba(248, 250, 252, 0.6);
+      }
+      header h1 {
+        margin: 8px 0 4px;
+        font-size: 2rem;
+      }
+      header .date {
+        font-size: 0.95rem;
+        color: rgba(248, 250, 252, 0.72);
+      }
+      main {
+        max-width: 980px;
+        margin: 32px auto 60px;
+        padding: 0 24px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px 22px;
+        margin-bottom: 20px;
+        box-shadow: var(--shadow);
+      }
+      .card h2 {
+        margin: 0 0 8px;
+        font-size: 1.2rem;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 0.85rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+      .badge.warn {
+        background: rgba(192, 54, 44, 0.1);
+        color: var(--warn);
+      }
+      .chip {
+        display: inline-flex;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--chip-bg);
+        color: var(--chip-ink);
+        font-size: 0.75rem;
+        margin: 4px 6px 0 0;
+      }
+      .links {
+        margin-top: 12px;
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+      }
+      a:hover { color: var(--accent-2); }
+      .empty {
+        padding: 40px;
+        text-align: center;
+        background: var(--panel);
+        border-radius: 16px;
+        border: 1px dashed var(--border);
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="kicker">OpenCTI Briefing</div>
+      <h1>Daily Briefing</h1>
+      <div class="date">{{ date }}</div>
+    </header>
+    <main>
+      {% if items %}
+        {% for item in items %}
+          <section class="card">
+            <h2>{{ item.title }}</h2>
+            <div class="meta">
+              <span>Created: {{ item.created_at }}</span>
+              {% if item.watch_hit %}
+                <span class="badge warn">Watch alert</span>
+              {% endif %}
+            </div>
+            <p>{{ item.description }}</p>
+            {% if item.cves %}
+              <div>
+                {% for cve in item.cves %}
+                  <span class="chip">{{ cve }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+            {% if item.observables %}
+              <div>
+                {% for obs in item.observables %}
+                  <span class="chip">{{ obs }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+            {% if item.source_url %}
+              <div class="links"><a href="{{ item.source_url }}">Open source</a></div>
+            {% endif %}
+          </section>
+        {% endfor %}
+      {% else %}
+        <div class="empty">No items found in this briefing window.</div>
+      {% endif %}
+    </main>
+  </body>
 </html>

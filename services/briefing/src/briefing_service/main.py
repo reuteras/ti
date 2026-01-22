@@ -276,16 +276,16 @@ async def denylist_save(request: Request) -> RedirectResponse:
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     links = [
-        ("/denylist", "Denylist"),
-        ("/miniflux/feeds", "Miniflux feeds"),
-        ("/readwise/tags", "Readwise tags"),
-        ("/zotero/tags", "Zotero tags"),
-        ("/zotero/collections", "Zotero collections"),
-        ("/feeds/daily.rss", "Daily briefings RSS"),
-        ("/latest", "Latest briefing"),
+        ("/denylist", "Denylist", "Block entities, authors, and patterns."),
+        ("/miniflux/feeds", "Miniflux feeds", "Approve the feeds you want to ingest."),
+        ("/readwise/tags", "Readwise tags", "Approve tags for Readwise ingestion."),
+        ("/zotero/tags", "Zotero tags", "Approve tags for Zotero ingestion."),
+        ("/zotero/collections", "Zotero collections", "Approve collections for Zotero ingestion."),
+        ("/feeds/daily.rss", "Daily briefings RSS", "Subscribe to daily briefing feed."),
+        ("/latest", "Latest briefing", "View the most recent briefing."),
     ]
-    rows = "".join(f"<li><a href=\"{path}\">{label}</a></li>" for path, label in links)
-    return f"<html><body><h1>Briefing Service</h1><ul>{rows}</ul></body></html>"
+    template = env.get_template("index.html")
+    return template.render(links=links)
 
 
 @app.get("/latest", response_class=HTMLResponse)

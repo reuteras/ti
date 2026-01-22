@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 import re
 import time
@@ -497,27 +498,20 @@ class OpenCTIClient:
             return None
         if not self._observables_supported:
             return None
-        normalized = obs_type.replace("-", "")
-        field_map = {
-            "IPv4Addr": "IPv4Addr",
-            "IPv6Addr": "IPv6Addr",
-            "DomainName": "DomainName",
-            "Url": "Url",
-            "AutonomousSystem": "AutonomousSystem",
-        }
-        field = field_map.get(normalized)
-        if field:
-            input_mutation = f"""
-            mutation ObservableAdd($input: {field}AddInput!) {{
-              stixCyberObservableAdd({field}: $input) {{ id }}
-            }}
-            """
+        normalized_value = (value or "").strip()
+        normalized_type = obs_type
+        if normalized_type in {"IPv4-Addr", "IPv6-Addr"}:
+            candidate = normalized_value
+            if candidate.startswith("[") and "]" in candidate:
+                candidate = candidate[1 : candidate.index("]")]
+            if normalized_type == "IPv4-Addr" and ":" in candidate:
+                candidate = candidate.split(":", 1)[0]
             try:
-                data = self._post(input_mutation, {"input": {"value": value}})
-                return data.get("stixCyberObservableAdd", {}).get("id")
-            except Exception as exc:
-                logger.warning("opencti_observable_add_failed error=%s", exc)
-                return None
+                ip_addr = ipaddress.ip_address(candidate)
+                normalized_type = "IPv4-Addr" if ip_addr.version == 4 else "IPv6-Addr"
+                normalized_value = ip_addr.compressed
+            except ValueError:
+                normalized_value = value
 
         legacy_mutation = """
         mutation ObservableAdd($type: String!, $value: String!) {
@@ -525,9 +519,32 @@ class OpenCTIClient:
         }
         """
         try:
-            data = self._post(legacy_mutation, {"type": obs_type, "value": value})
+            data = self._post(legacy_mutation, {"type": normalized_type, "value": normalized_value})
         except Exception as exc:
-            if "Unknown argument" in str(exc) or "stixCyberObservableAdd" in str(exc):
+            message = str(exc)
+            if "Unknown argument" in message and "type" in message:
+                normalized = normalized_type.replace("-", "")
+                field_map = {
+                    "IPv4Addr": "IPv4Addr",
+                    "IPv6Addr": "IPv6Addr",
+                    "DomainName": "DomainName",
+                    "Url": "Url",
+                    "AutonomousSystem": "AutonomousSystem",
+                }
+                field = field_map.get(normalized)
+                if field:
+                    input_mutation = f"""
+                    mutation ObservableAdd($input: {field}AddInput!) {{
+                      stixCyberObservableAdd({field}: $input) {{ id }}
+                    }}
+                    """
+                    try:
+                        data = self._post(input_mutation, {"input": {"value": normalized_value}})
+                        return data.get("stixCyberObservableAdd", {}).get("id")
+                    except Exception as fallback_exc:
+                        logger.warning("opencti_observable_add_failed error=%s", fallback_exc)
+                        return None
+            if "stixCyberObservableAdd" in message and "type" in message:
                 self._observables_supported = False
                 logger.warning("opencti_observable_add_disabled")
                 return None

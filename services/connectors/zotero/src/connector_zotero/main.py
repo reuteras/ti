@@ -20,6 +20,7 @@ from connectors_common.state_store import StateStore
 from connectors_common.denylist import filter_values
 from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.url_utils import canonicalize_url, normalize_doi, url_hash
+from connectors_common.work import WorkTracker
 
 logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
 logger = logging.getLogger(__name__)
@@ -198,6 +199,7 @@ class ZoteroConnector:
         if not self.api_key or not self.library_id:
             logger.warning("zotero_not_configured")
             return
+        work = WorkTracker(self.helper, "Zotero import")
         since_version = self.state.get("last_version")
         cutoff_dt = None
         if not since_version and self.zotero_lookback_days > 0:
@@ -206,12 +208,21 @@ class ZoteroConnector:
         approved_collections = fetch_approved_collections(self.briefing_url)
         if not approved_tags and not approved_collections:
             logger.info("zotero_no_approved_filters")
+            work.done("No approved filters")
             return
         recent_reports = self.client.list_reports_since(datetime.now(timezone.utc) - timedelta(days=self.dedup_days))
         candidates = prepare_candidates(recent_reports)
         items, last_version = fetch_items(self.api_key, self.library_type, self.library_id, since_version)
+        total_items = len(items)
+        work.log(f"items={total_items}")
         annotations = []
-        for item in items:
+        last_progress = -1
+        for idx, item in enumerate(items, start=1):
+            if total_items:
+                percent = int((idx / total_items) * 100)
+                if percent >= last_progress + 5:
+                    work.progress(percent, f"processed_items={idx}/{total_items}")
+                    last_progress = percent
             data = item.get("data", {})
             if data.get("itemType") == "annotation":
                 annotations.append(item)
@@ -395,6 +406,7 @@ class ZoteroConnector:
         if last_version and last_version != since_version:
             self.state.set("last_version", last_version)
         logger.info("zotero_run_completed items=%s", len(items))
+        work.done(f"items={len(items)}")
 
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):

@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any, Iterable, Optional, TypedDict
 
 import httpx
+import ipaddress
 from dateutil import parser as date_parser
 from pycti import OpenCTIConnectorHelper
 
 from connectors_common.state_store import StateStore
+from connectors_common.work import WorkTracker
 
 logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
 logger = logging.getLogger("connector_cvelist")
@@ -538,27 +540,20 @@ class OpenCTIClient:
     def create_observable(self, obs_type: str, value: str) -> str | None:
         if not self._observables_supported:
             return None
-        normalized = obs_type.replace("-", "")
-        field_map = {
-            "IPv4Addr": "IPv4Addr",
-            "IPv6Addr": "IPv6Addr",
-            "DomainName": "DomainName",
-            "Url": "Url",
-            "AutonomousSystem": "AutonomousSystem",
-        }
-        field = field_map.get(normalized)
-        if field:
-            input_mutation = f"""
-            mutation ObservableAdd($input: {field}AddInput!) {{
-              stixCyberObservableAdd({field}: $input) {{ id }}
-            }}
-            """
+        normalized_value = (value or "").strip()
+        normalized_type = obs_type
+        if normalized_type in {"IPv4-Addr", "IPv6-Addr"}:
+            candidate = normalized_value
+            if candidate.startswith("[") and "]" in candidate:
+                candidate = candidate[1 : candidate.index("]")]
+            if normalized_type == "IPv4-Addr" and ":" in candidate:
+                candidate = candidate.split(":", 1)[0]
             try:
-                data = self._post(input_mutation, {"input": {"value": value}})
-                return data.get("stixCyberObservableAdd", {}).get("id")
-            except Exception as exc:
-                logger.warning("cvelist_observable_add_failed error=%s", exc)
-                return None
+                ip_addr = ipaddress.ip_address(candidate)
+                normalized_type = "IPv4-Addr" if ip_addr.version == 4 else "IPv6-Addr"
+                normalized_value = ip_addr.compressed
+            except ValueError:
+                normalized_value = value
 
         legacy_mutation = """
         mutation ObservableAdd($type: String!, $value: String!) {
@@ -566,9 +561,32 @@ class OpenCTIClient:
         }
         """
         try:
-            data = self._post(legacy_mutation, {"type": obs_type, "value": value})
+            data = self._post(legacy_mutation, {"type": normalized_type, "value": normalized_value})
         except Exception as exc:
-            if "Unknown argument" in str(exc) or "stixCyberObservableAdd" in str(exc):
+            message = str(exc)
+            if "Unknown argument" in message and "type" in message:
+                normalized = normalized_type.replace("-", "")
+                field_map = {
+                    "IPv4Addr": "IPv4Addr",
+                    "IPv6Addr": "IPv6Addr",
+                    "DomainName": "DomainName",
+                    "Url": "Url",
+                    "AutonomousSystem": "AutonomousSystem",
+                }
+                field = field_map.get(normalized)
+                if field:
+                    input_mutation = f"""
+                    mutation ObservableAdd($input: {field}AddInput!) {{
+                      stixCyberObservableAdd({field}: $input) {{ id }}
+                    }}
+                    """
+                    try:
+                        data = self._post(input_mutation, {"input": {"value": normalized_value}})
+                        return data.get("stixCyberObservableAdd", {}).get("id")
+                    except Exception as fallback_exc:
+                        logger.warning("cvelist_observable_add_failed error=%s", fallback_exc)
+                        return None
+            if "stixCyberObservableAdd" in message and "type" in message:
                 self._observables_supported = False
                 return None
             logger.warning("cvelist_observable_add_failed error=%s", exc)
@@ -701,6 +719,7 @@ class CveListConnector:
         self.epss_path = Path("/data/epss/epss_scores-current.csv.gz")
 
     def _run(self) -> None:
+        work = WorkTracker(self.helper, "CVE List V5 import")
         try:
             refreshed = _ensure_epss_file(self.epss_path, self.epss_url, self.epss_refresh_seconds)
             if refreshed:
@@ -711,6 +730,7 @@ class CveListConnector:
             last_commit = self.state.get("last_commit")
             if last_commit == head:
                 logger.info("cvelist_no_changes")
+                work.done("No changes")
                 return
             changed = None
             if last_commit:
@@ -718,15 +738,29 @@ class CveListConnector:
                 if not changed:
                     logger.info("cvelist_no_changed_files")
                     self.state.set("last_commit", head)
+                    work.done("No changed files")
                     return
+            total_files = len(changed) if changed is not None else 0
+            if total_files:
+                work.log(f"files={total_files}")
             count = 0
+            last_progress = -1
             for path in _iter_cve_files(self.repo_path, changed):
                 _process_cve_file(self.client, path, epss_scores)
                 count += 1
+                if total_files:
+                    percent = int((count / total_files) * 100)
+                    if percent >= last_progress + 5:
+                        work.progress(percent, f"processed_files={count}/{total_files}")
+                        last_progress = percent
+                elif count % 100 == 0:
+                    work.progress(None, f"processed_files={count}")
             logger.info("cvelist_run_complete count=%s", count)
             self.state.set("last_commit", head)
+            work.done(f"files={count}")
         except Exception as exc:
             logger.warning("cvelist_run_failed error=%s", exc)
+            work.done("Run failed")
 
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):

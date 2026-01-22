@@ -21,6 +21,7 @@ from connectors_common.state_store import StateStore
 from connectors_common.denylist import filter_values
 from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.url_utils import canonicalize_url, url_hash
+from connectors_common.work import WorkTracker
 
 logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
 logger = logging.getLogger(__name__)
@@ -180,23 +181,33 @@ class ReadwiseConnector:
         if not self.token:
             logger.warning("readwise_not_configured")
             return
+        work = WorkTracker(self.helper, "Readwise import")
         updated_after = self.state.get("updated_after")
         if not updated_after and self.readwise_lookback_days > 0:
             updated_after = (datetime.now(timezone.utc) - timedelta(days=self.readwise_lookback_days)).isoformat()
         approved_tags = fetch_approved_tags(self.briefing_url)
         if not approved_tags:
             logger.info("readwise_no_approved_tags")
+            work.done("No approved tags")
             return
         recent_reports = self.client.list_reports_since(datetime.now(timezone.utc) - timedelta(days=self.dedup_days))
         candidates = prepare_candidates(recent_reports)
         documents = fetch_documents(self.token, updated_after)
+        total_documents = len(documents)
+        work.log(f"documents={total_documents}")
         max_seen_dt = isoparse(updated_after) if updated_after else None
         tag_cache: dict[str, set[str]] = {}
         for doc in documents:
             doc_tags = _collect_tags(doc)
             if doc_tags and getattr(doc, "id", None):
                 tag_cache[doc.id] = doc_tags
-        for doc in documents:
+        last_progress = -1
+        for idx, doc in enumerate(documents, start=1):
+            if total_documents:
+                percent = int((idx / total_documents) * 100)
+                if percent >= last_progress + 5:
+                    work.progress(percent, f"processed_documents={idx}/{total_documents}")
+                    last_progress = percent
             updated_at = getattr(doc, "updated_at", None)
             updated_iso = isoparse(updated_at).isoformat() if updated_at else None
             doc_tags = _collect_tags(doc)
@@ -354,6 +365,7 @@ class ReadwiseConnector:
         if max_seen_dt:
             self.state.set("updated_after", max_seen_dt.isoformat())
         logger.info("readwise_run_completed documents=%s", len(documents))
+        work.done(f"documents={len(documents)}")
 
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):

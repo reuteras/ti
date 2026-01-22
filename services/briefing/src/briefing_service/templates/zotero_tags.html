@@ -1,60 +1,153 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Zotero Tags</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    th { background: #f4f4f4; }
-    .approved { color: #0a7d2c; font-weight: bold; }
-    .pending { color: #8a4b00; font-weight: bold; }
-    .actions form { display: inline; }
-  </style>
-</head>
-<body>
-  <h1>Zotero Tags</h1>
-  <p><a href="/">Back to index</a></p>
-  <form method="post" action="/zotero/tags/refresh">
-    <button type="submit">Refresh Tags</button>
-  </form>
-  <p>Total tags: {{ tags|length }}</p>
-  <table>
-    <thead>
-      <tr>
-        <th>Status</th>
-        <th>Tag</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for tag, approved, _ in tags %}
-        <tr>
-          <td>
-            {% if approved %}
-              <span class="approved">Approved</span>
-            {% else %}
-              <span class="pending">Pending</span>
-            {% endif %}
-          </td>
-          <td>{{ tag }}</td>
-          <td class="actions">
-            {% if approved %}
-              <form method="post" action="/zotero/tags/reject">
-                <input type="hidden" name="tag" value="{{ tag }}">
-                <button type="submit">Reject</button>
-              </form>
-            {% else %}
-              <form method="post" action="/zotero/tags/approve">
-                <input type="hidden" name="tag" value="{{ tag }}">
-                <button type="submit">Approve</button>
-              </form>
-            {% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</body>
+  <head>
+    <meta charset="UTF-8">
+    <title>Zotero Tags</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --ink: #0b1f3a;
+        --muted: #5f6f81;
+        --accent: #2f6feb;
+        --accent-2: #12b5cb;
+        --border: #d9e2ec;
+        --shadow: 0 18px 40px rgba(15, 28, 45, 0.08);
+        --success: #1f7a3a;
+        --pending: #9b5d00;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        background: linear-gradient(135deg, #f5f7fb 0%, #eef4ff 35%, #f7f9fc 100%);
+        color: var(--ink);
+      }
+      header {
+        background: radial-gradient(circle at top right, rgba(47, 111, 235, 0.28), transparent 55%), #0b1f3a;
+        color: #f8fafc;
+        padding: 24px 32px;
+      }
+      header h1 { margin: 6px 0 0; font-size: 1.8rem; }
+      header .kicker {
+        font-size: 0.75rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: rgba(248, 250, 252, 0.6);
+      }
+      main {
+        max-width: 900px;
+        margin: 28px auto 60px;
+        padding: 0 24px;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 16px;
+        box-shadow: var(--shadow);
+      }
+      .link {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .link:hover { color: var(--accent-2); }
+      .count { color: var(--muted); font-size: 0.9rem; }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.95rem;
+      }
+      th, td {
+        padding: 12px 10px;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+      }
+      th { color: var(--muted); font-weight: 600; }
+      .status {
+        font-weight: 700;
+        font-size: 0.85rem;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+      .approved { color: var(--success); }
+      .pending { color: var(--pending); }
+      .actions form { display: inline; }
+      button {
+        border: 1px solid var(--border);
+        background: #f4f7ff;
+        color: var(--ink);
+        border-radius: 10px;
+        padding: 6px 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="kicker">OpenCTI Briefing</div>
+      <h1>Zotero Tags</h1>
+    </header>
+    <main>
+      <div class="toolbar">
+        <a class="link" href="/">Home</a>
+        <form method="post" action="/zotero/tags/refresh">
+          <button type="submit">Refresh tags</button>
+        </form>
+        <span class="count">Total tags: {{ tags|length }}</span>
+      </div>
+      <div class="panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Tag</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for tag, approved, _ in tags %}
+              <tr>
+                <td>
+                  {% if approved %}
+                    <span class="status approved">Approved</span>
+                  {% else %}
+                    <span class="status pending">Pending</span>
+                  {% endif %}
+                </td>
+                <td>{{ tag }}</td>
+                <td class="actions">
+                  {% if approved %}
+                    <form method="post" action="/zotero/tags/reject">
+                      <input type="hidden" name="tag" value="{{ tag }}">
+                      <button type="submit">Reject</button>
+                    </form>
+                  {% else %}
+                    <form method="post" action="/zotero/tags/approve">
+                      <input type="hidden" name="tag" value="{{ tag }}">
+                      <button type="submit">Approve</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </body>
 </html>
