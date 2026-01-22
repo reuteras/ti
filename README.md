@@ -8,7 +8,7 @@ Personal Threat Intel platform:
   - Miniflux (RSS)
   - Readwise / Readwise Reader
   - Zotero (docs/PDFs/notes)
-- Official OpenCTI connectors for public data and enrichment (AlienVault OTX, URLhaus, ThreatFox, Abuse.ch SSL, MalwareBazaar, Malpedia, Montysecurity C2-Tracker, RansomwareLive, CISA KEV, EPSS, VirusTotal, Shodan, OpenCTI Datasets, YARA, MISP Feed, CVE List V5)
+- Official OpenCTI connectors for public data and enrichment (AlienVault OTX, URLhaus, ThreatFox, Abuse.ch SSL, MalwareBazaar, Malpedia, RansomwareLive, CISA KEV, EPSS, VirusTotal, Shodan, OpenCTI Datasets, YARA, MISP Feed, CVE List V5)
 - A "briefing service" that:
   - queries OpenCTI for new intel since last run
   - produces a daily briefing (HTML + RSS/Atom)
@@ -34,14 +34,15 @@ OpenCTI’s “official” way for connectors is typically via their connector f
 - Prefer the official OpenCTI Python client / connector patterns if feasible
 - But for MVP, it’s acceptable to talk GraphQL directly (fewer moving parts), as long as it’s idempotent and stable.
 
-## Optional local LLM summaries
-Connectors can optionally call a local LLM endpoint to append short summaries to ingested text.
+## Manuall connectors
 
-1) Run a local Ollama (default):
-   - Endpoint: `http://host.docker.internal:11434/api/generate`
-2) Set in `.env`:
-   - `ENRICHMENT_LLM_ENABLED=true`
-   - `ENRICHMENT_LLM_ENDPOINT=http://host.docker.internal:11434/api/generate`
-   - `ENRICHMENT_LLM_MODEL=phi3:mini`
+From OpenCTI Integrations Library, [hub](https://hub.filigran.io/app/service/opencti_integrations).
 
-You can point `ENRICHMENT_LLM_ENDPOINT` to any compatible HTTP endpoint (local or container).
+- Threatview.io - C2 Hunt Feed
+- Threatview.io - Bitcoin Address Intel
+- Spamhaus DROP list
+- LolBas Project
+- James Brine Threat Feed Endpoint
+- Emerging Threats Blockrules Compromised IPs
+- Dan.me.uk (EXIT Nodes only)
+:

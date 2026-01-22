@@ -1,5 +1,4 @@
 import hashlib
-import ipaddress
 import logging
 import os
 import time
@@ -13,17 +12,12 @@ from pycti import OpenCTIConnectorHelper
 from readwise.api import ReadwiseReader
 
 from connectors_common.dedup import find_best_match, prepare_candidates
+from connectors_common.fingerprint import content_fingerprint
+from connectors_common.identity import CandidateIdentity, resolve_canonical_id, store_identity_mappings
+from connectors_common.mapping_store import MappingStore
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
-from connectors_common.enrichment import apply_label_rules, source_confidence, source_labels
-from connectors_common.extractors import (
-    extract_cves,
-    extract_label_entities,
-    extract_iocs,
-    extract_organizations,
-    extract_products,
-)
+from connectors_common.enrichment import source_confidence, source_labels
 from connectors_common.state_store import StateStore
-from connectors_common.llm import summarize_text, extract_entities
 from connectors_common.denylist import filter_values
 from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.url_utils import canonicalize_url, url_hash
@@ -31,12 +25,20 @@ from connectors_common.url_utils import canonicalize_url, url_hash
 logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
 logger = logging.getLogger(__name__)
 
+_URL_RE = re.compile(r"https?://[^\s<>\"]+")
 
-def _observable_type_for_ip(value: str) -> str:
-    try:
-        return "IPv6-Addr" if ipaddress.ip_address(value).version == 6 else "IPv4-Addr"
-    except ValueError:
-        return "IPv4-Addr"
+
+def _clean_url(value: str) -> str:
+    if not value:
+        return ""
+    return value.strip(".,;:!?)}]>'\"")
+
+
+def _extract_urls(text: str) -> set[str]:
+    if not text:
+        return set()
+    urls = {_clean_url(match) for match in _URL_RE.findall(text)}
+    return {url for url in urls if url}
 
 
 def _split_authors(value: str | None) -> list[str]:
@@ -48,10 +50,6 @@ def _split_authors(value: str | None) -> list[str]:
 
 
 def _select_opencti_token() -> str:
-    use_connector_token = os.getenv("OPENCTI_USE_CONNECTOR_TOKEN", "").lower() == "true"
-    connector_token = os.getenv("OPENCTI_TOKEN", "")
-    if use_connector_token and connector_token and connector_token != "changeme":
-        return connector_token
     return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
 
 
@@ -120,10 +118,9 @@ def fetch_approved_tags(briefing_url: str) -> set[str]:
 
 class ReadwiseConnector:
     def __init__(self) -> None:
-        self.token = os.getenv("READWISE_TOKEN", "")
+        self.token = os.getenv("READWISE_API_KEY", "")
         opencti_url = os.getenv("OPENCTI_URL", "http://opencti:8080")
         admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
-        use_connector_token = os.getenv("OPENCTI_USE_CONNECTOR_TOKEN", "").lower() == "true"
         opencti_token = _select_opencti_token()
         if not opencti_token:
             raise RuntimeError("readwise_missing_token")
@@ -149,21 +146,21 @@ class ReadwiseConnector:
             }
             return OpenCTIConnectorHelper(config)
 
-        try:
-            self.helper = _build_helper(opencti_token)
-        except Exception as exc:
-            if use_connector_token and admin_token and opencti_token != admin_token:
-                logger.warning("readwise_connector_token_invalid_fallback error=%s", exc)
-                opencti_token = admin_token
-                self.helper = _build_helper(opencti_token)
-            else:
-                raise
+        self.helper = _build_helper(opencti_token)
         self.fallback_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN", "")
         self.interval = int(os.getenv("CONNECTOR_RUN_INTERVAL_SECONDS", "600"))
         self.dedup_days = int(os.getenv("DEDUP_LOOKBACK_DAYS_READWISE", "7"))
         self.dedup_threshold = float(os.getenv("DEDUP_SIMILARITY_READWISE", "0.85"))
         self.briefing_url = os.getenv("BRIEFING_SERVICE_URL", "http://briefing:8088")
         self.state = StateStore("/data/state.json")
+        mapping_path = os.getenv("TI_MAPPING_DB", "/data/mapping/ti-mapping.sqlite")
+        self.mapping = MappingStore(mapping_path)
+        self.allow_title_fallback = os.getenv("TI_ALLOW_TITLE_FALLBACK", "false").lower() == "true"
+        self.readwise_lookback_days = int(os.getenv("TI_READWISE_LOOKBACK_DAYS", "14"))
+        link_strategy = os.getenv("TI_LINK_STRATEGY", "none").lower()
+        self.link_strategy = link_strategy if link_strategy in {"report", "reference_only", "none"} else "none"
+        default_confidence = os.getenv("TI_CONFIDENCE_IMPORT", "").strip()
+        self.default_confidence = int(default_confidence) if default_confidence else None
         self.client = OpenCTIClient(opencti_url, opencti_token, fallback_token=self.fallback_token)
 
     def _resolve_author(self, key: str, name: str, identity_type: str) -> str | None:
@@ -184,6 +181,8 @@ class ReadwiseConnector:
             logger.warning("readwise_not_configured")
             return
         updated_after = self.state.get("updated_after")
+        if not updated_after and self.readwise_lookback_days > 0:
+            updated_after = (datetime.now(timezone.utc) - timedelta(days=self.readwise_lookback_days)).isoformat()
         approved_tags = fetch_approved_tags(self.briefing_url)
         if not approved_tags:
             logger.info("readwise_no_approved_tags")
@@ -210,22 +209,9 @@ class ReadwiseConnector:
                 )
                 continue
 
-            source_url = canonicalize_url(
-                getattr(doc, "source_url", None) or getattr(doc, "url", None) or ""
-            )
+            raw_url = getattr(doc, "source_url", None) or getattr(doc, "url", None) or ""
+            source_url = canonicalize_url(raw_url)
             url_digest = url_hash(source_url)
-            if url_digest and not self.state.remember_hash("readwise", url_digest):
-                logger.info(
-                    "report_skipped source=readwise reason=duplicate_hash title=%s",
-                    getattr(doc, "title", None) or "Readwise document",
-                )
-                continue
-            if source_url and self.client.report_exists_by_external_reference(source_url):
-                logger.info(
-                    "report_skipped source=readwise reason=existing_external_reference title=%s",
-                    getattr(doc, "title", None) or "Readwise document",
-                )
-                continue
 
             text_input = (
                 getattr(doc, "content", None)
@@ -235,33 +221,8 @@ class ReadwiseConnector:
             )
             text = extract_main_text(text_input)
             text = format_readable_text(text)
-            summary = summarize_text(text)
-            if summary:
-                text = f"{text}\n\nSummary:\n{summary}"
-            cves = extract_cves(text)
-            iocs = extract_iocs(text)
-            orgs = extract_organizations(text)
-            products = extract_products(text)
-            entities = extract_entities(text)
-            people = entities.get("persons", [])
-            orgs = sorted(set(orgs).union(entities.get("organizations", [])))
-            products = sorted(set(products).union(entities.get("products", [])))
-            iocs["countries"] = sorted(set(iocs["countries"]).union(entities.get("countries", [])))
+            content_fp = content_fingerprint(text)
             labels = ["source:readwise"] + source_labels("readwise")
-            labels += [f"cve:{cve}" for cve in cves]
-            labels += [f"ioc:url" for _ in iocs["urls"]]
-            labels += [f"ioc:domain" for _ in iocs["domains"]]
-            labels += apply_label_rules(text)
-            labels = sorted({label for label in labels if label})
-            label_entities = extract_label_entities(labels)
-            cves = sorted(set(cves).union(label_entities["cves"]))
-            iocs["urls"] = sorted(set(iocs["urls"]).union(label_entities["urls"]))
-            iocs["domains"] = sorted(set(iocs["domains"]).union(label_entities["domains"]))
-            iocs["ipv4"] = sorted(set(iocs["ipv4"]).union(label_entities["ipv4"]))
-            iocs["asns"] = sorted(set(iocs["asns"]).union(label_entities["asns"]))
-            iocs["countries"] = sorted(set(iocs["countries"]).union(label_entities["countries"]))
-            orgs = sorted(set(orgs).union(label_entities["organizations"]))
-            products = sorted(set(products).union(label_entities["products"]))
             author_name = (getattr(doc, "author", None) or "").strip()
             author_ids: list[str] = []
             authors = _split_authors(author_name)
@@ -279,96 +240,113 @@ class ReadwiseConnector:
                     if extra_id:
                         author_ids.append(extra_id)
 
-            report = ReportInput(
-                title=getattr(doc, "title", None) or "Readwise document",
-                description=text,
-                published=_published_from_doc(doc),
-                source_name="readwise",
-                source_url=source_url or None,
-                author=author_name or None,
-                created_by_id=author_id,
-                labels=labels,
-                confidence=source_confidence("readwise"),
-                external_id=url_digest or None,
+            title = getattr(doc, "title", None) or "Readwise document"
+            published = _published_from_doc(doc)
+            external_ids: list[tuple[str, str]] = []
+            doc_id = getattr(doc, "id", None)
+            if doc_id is not None:
+                external_ids.append(("readwise_doc", str(doc_id)))
+            url_candidates = [source_url] if source_url else []
+            confidence = source_confidence("readwise")
+            if confidence is None:
+                confidence = self.default_confidence
+            candidate = CandidateIdentity(
+                urls=url_candidates,
+                external_ids=external_ids,
+                content_fp=content_fp or None,
+                title=title,
+                published=published,
             )
-            duplicate = find_best_match(report.title, candidates, self.dedup_threshold)
-            if duplicate:
-                new_conf = report.confidence or 0
-                old_conf = duplicate.confidence or 0
-                if source_url and new_conf < old_conf:
-                    self.client.add_external_reference_to_report(
-                        duplicate.report_id,
-                        report.source_name,
-                        source_url,
-                        report.external_id,
-                    )
-                    logger.info(
-                        "report_skipped source=readwise reason=lower_confidence_duplicate title=%s",
-                        report.title,
-                    )
-                    continue
-
-            report_id = self.client.create_report(report)
-            if report_id:
-                logger.info("report_created source=readwise id=%s title=%s", report_id, report.title)
+            report_id, match_reason = resolve_canonical_id(
+                self.mapping,
+                candidate,
+                allow_title_fallback=self.allow_title_fallback,
+            )
+            if not report_id and self.allow_title_fallback:
+                duplicate = find_best_match(title, candidates, self.dedup_threshold)
                 if duplicate:
-                    self.client.create_relationship(report_id, duplicate.report_id, "related-to")
+                    report_id = duplicate.report_id
+                    match_reason = "title_similarity"
+            if not report_id:
+                report = ReportInput(
+                    title=title,
+                    description=text,
+                    published=published,
+                    source_name="readwise",
+                    source_url=source_url or None,
+                    author=author_name or None,
+                    created_by_id=author_id,
+                    labels=labels,
+                    confidence=confidence,
+                    external_id=url_digest or None,
+                )
+                report_id = self.client.create_report(report)
+            if report_id:
+                logger.info(
+                    "report_upserted source=readwise id=%s title=%s match=%s",
+                    report_id,
+                    title,
+                    match_reason or "created",
+                )
+                existing_url_owner = self.mapping.get_by_url_hash(url_digest)
+                store_identity_mappings(self.mapping, report_id, "Report", candidate)
+                should_add_ref = True
+                if url_digest:
+                    should_add_ref = self.state.remember_hash(
+                        "external_ref",
+                        f"{report_id}:{url_digest}",
+                    )
+                if source_url and existing_url_owner is None and should_add_ref:
+                    self.client.add_external_reference_to_report(
+                        report_id,
+                        "readwise",
+                        source_url,
+                        url_digest or None,
+                    )
                 for author_id in author_ids:
                     self.client.create_relationship(report_id, author_id, "related-to")
-                for cve in cves:
-                    vuln_id = self.client.create_vulnerability(cve)
-                    if vuln_id:
-                        self.client.create_relationship(report_id, vuln_id, "related-to")
-                for url in iocs["urls"]:
-                    obs_id = self.client.create_observable("Url", url)
-                    if obs_id:
-                        self.client.create_relationship(report_id, obs_id, "related-to")
-                for domain in iocs["domains"]:
-                    obs_id = self.client.create_observable("Domain-Name", domain)
-                    if obs_id:
-                        self.client.create_relationship(report_id, obs_id, "related-to")
-                for ip in iocs["ipv4"]:
-                    obs_id = self.client.create_observable(_observable_type_for_ip(ip), ip)
-                    if obs_id:
-                        self.client.create_relationship(report_id, obs_id, "related-to")
-                for asn in iocs["asns"]:
-                    obs_id = self.client.create_observable("Autonomous-System", asn)
-                    if obs_id:
-                        self.client.create_relationship(report_id, obs_id, "related-to")
-                for country in iocs["countries"]:
-                    country_id = self.client.create_country(country)
-                    if country_id:
-                        self.client.create_relationship(report_id, country_id, "related-to")
-                for person in people:
-                    person_id = self.client.create_identity(person, "Individual")
-                    if person_id:
-                        self.client.create_relationship(report_id, person_id, "related-to")
-                for name in orgs:
-                    org_entity = self.client.create_identity(name, "Organization")
-                    if org_entity:
-                        self.client.create_relationship(report_id, org_entity, "related-to")
-                for name in products:
-                    software_id = self.client.create_software(name)
-                    if software_id:
-                        self.client.create_relationship(report_id, software_id, "related-to")
-                for name in label_entities["malware"]:
-                    malware_id = self.client.create_malware(name)
-                    if malware_id:
-                        self.client.create_relationship(report_id, malware_id, "related-to")
-                for name in label_entities["tools"]:
-                    tool_id = self.client.create_tool(name)
-                    if tool_id:
-                        self.client.create_relationship(report_id, tool_id, "related-to")
-                for name in label_entities["threat_actors"]:
-                    actor_id = self.client.create_threat_actor(name)
-                    if actor_id:
-                        self.client.create_relationship(report_id, actor_id, "related-to")
-                for name in label_entities["attack_patterns"]:
-                    attack_id = self.client.create_attack_pattern(name)
-                    if attack_id:
-                        self.client.create_relationship(report_id, attack_id, "related-to")
+                highlights = getattr(doc, "highlights", None) or []
+                self._handle_extracted_links(report_id, text_input, highlights)
+                for highlight in highlights:
+                    highlight_id = getattr(highlight, "id", None)
+                    if highlight_id is None:
+                        continue
+                    external_id = str(highlight_id)
+                    existing_note = self.mapping.get_by_external_id("readwise_highlight", external_id)
+                    if existing_note:
+                        continue
+                    excerpt = getattr(highlight, "text", None) or ""
+                    note_text = (getattr(highlight, "note", None) or "").strip()
+                    location = getattr(highlight, "location", None)
+                    location_type = getattr(highlight, "location_type", None)
+                    lines = []
+                    if excerpt:
+                        lines.append(excerpt.strip())
+                    if note_text:
+                        lines.append(f"Note: {note_text}")
+                    if location is not None:
+                        lines.append(f"Location: {location}")
+                    if location_type:
+                        lines.append(f"Location type: {location_type}")
+                    if source_url:
+                        lines.append(f"Source: {source_url}")
+                    content = "\n".join(line for line in lines if line)
+                    if not content:
+                        continue
+                    note_id = self.client.create_note(
+                        content,
+                        object_refs=[report_id],
+                        labels=["source:readwise"],
+                    )
+                    if note_id:
+                        self.mapping.upsert_external_id(
+                            "readwise_highlight",
+                            external_id,
+                            note_id,
+                            "Note",
+                        )
             else:
-                logger.info("report_skipped source=readwise reason=create_failed title=%s", report.title)
+                logger.info("report_skipped source=readwise reason=create_failed title=%s", title)
             if updated_iso:
                 updated_dt = isoparse(updated_iso)
                 if not max_seen_dt or updated_dt > max_seen_dt:
@@ -384,6 +362,67 @@ class ReadwiseConnector:
         while True:
             self._run()
             time.sleep(self.interval)
+
+    def _handle_extracted_links(self, report_id: str, text_input: str, highlights: list) -> None:
+        if self.link_strategy == "none":
+            return
+        urls = set()
+        urls.update(_extract_urls(text_input or ""))
+        for highlight in highlights or []:
+            urls.update(_extract_urls(getattr(highlight, "text", None) or ""))
+            urls.update(_extract_urls(getattr(highlight, "note", None) or ""))
+        if not urls:
+            return
+        linked_ids: set[str] = set()
+        for raw_url in urls:
+            canonical = canonicalize_url(raw_url)
+            if not canonical:
+                continue
+            digest = url_hash(canonical)
+            if not digest:
+                continue
+            existing_id = self.mapping.get_by_url_hash(digest)
+            if existing_id:
+                if existing_id != report_id and existing_id not in linked_ids:
+                    self.client.create_relationship(report_id, existing_id, "related-to")
+                    linked_ids.add(existing_id)
+                continue
+            if self.link_strategy == "reference_only":
+                should_add_ref = self.state.remember_hash(
+                    "external_ref",
+                    f"{report_id}:{digest}",
+                )
+                if should_add_ref:
+                    self.client.add_external_reference_to_report(report_id, "readwise", canonical, digest)
+                continue
+            if self.link_strategy == "report":
+                linked_id = self._resolve_or_create_linked_report(canonical)
+                if linked_id and linked_id != report_id and linked_id not in linked_ids:
+                    self.client.create_relationship(report_id, linked_id, "related-to")
+                    linked_ids.add(linked_id)
+
+    def _resolve_or_create_linked_report(self, url: str) -> str | None:
+        candidate = CandidateIdentity(urls=[url])
+        report_id, _ = resolve_canonical_id(self.mapping, candidate, allow_title_fallback=False)
+        if report_id:
+            return report_id
+        title = url
+        confidence = source_confidence("readwise")
+        if confidence is None:
+            confidence = self.default_confidence
+        report = ReportInput(
+            title=title,
+            description="Referenced link from Readwise.",
+            published=None,
+            source_name="readwise-link",
+            source_url=url,
+            labels=["source:readwise"],
+            confidence=confidence,
+        )
+        report_id = self.client.create_report(report)
+        if report_id:
+            store_identity_mappings(self.mapping, report_id, "Report", candidate)
+        return report_id
 
 
 def main() -> None:

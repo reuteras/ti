@@ -1,2 +1,5 @@
 .env
 master-config.toml
+__pycache__/
+*.pyc
+.pytest_cache/

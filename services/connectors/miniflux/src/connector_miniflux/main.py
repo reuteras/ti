@@ -1,5 +1,4 @@
 import hashlib
-import ipaddress
 import logging
 import os
 import time
@@ -12,30 +11,18 @@ from dateutil.parser import isoparse
 from pycti import OpenCTIConnectorHelper
 
 from connectors_common.dedup import find_best_match, prepare_candidates
+from connectors_common.fingerprint import content_fingerprint
+from connectors_common.identity import CandidateIdentity, resolve_canonical_id, store_identity_mappings
+from connectors_common.mapping_store import MappingStore
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
-from connectors_common.enrichment import apply_label_rules, source_confidence, source_labels
-from connectors_common.extractors import (
-    extract_cves,
-    extract_label_entities,
-    extract_iocs,
-    extract_organizations,
-    extract_products,
-)
+from connectors_common.enrichment import source_confidence, source_labels
 from connectors_common.state_store import StateStore
-from connectors_common.llm import summarize_text, extract_entities
 from connectors_common.denylist import filter_values
 from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.url_utils import canonicalize_url, url_hash
 
 logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
 logger = logging.getLogger(__name__)
-
-
-def _observable_type_for_ip(value: str) -> str:
-    try:
-        return "IPv6-Addr" if ipaddress.ip_address(value).version == 6 else "IPv4-Addr"
-    except ValueError:
-        return "IPv4-Addr"
 
 
 def _split_authors(value: str | None) -> list[str]:
@@ -47,10 +34,6 @@ def _split_authors(value: str | None) -> list[str]:
 
 
 def _select_opencti_token() -> str:
-    use_connector_token = os.getenv("OPENCTI_USE_CONNECTOR_TOKEN", "").lower() == "true"
-    connector_token = os.getenv("OPENCTI_TOKEN", "")
-    if use_connector_token and connector_token and connector_token != "changeme":
-        return connector_token
     return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
 
 
@@ -162,10 +145,9 @@ def _derive_org_name(feed_title: str, source_url: str) -> str:
 class MinifluxConnector:
     def __init__(self) -> None:
         self.base_url = os.getenv("MINIFLUX_URL", "")
-        self.token = os.getenv("MINIFLUX_TOKEN", "")
+        self.token = os.getenv("MINIFLUX_API_KEY", "")
         opencti_url = os.getenv("OPENCTI_URL", "http://opencti:8080")
         admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
-        use_connector_token = os.getenv("OPENCTI_USE_CONNECTOR_TOKEN", "").lower() == "true"
         opencti_token = _select_opencti_token()
         if not opencti_token:
             raise RuntimeError("miniflux_missing_token")
@@ -191,15 +173,7 @@ class MinifluxConnector:
             }
             return OpenCTIConnectorHelper(config)
 
-        try:
-            self.helper = _build_helper(opencti_token)
-        except Exception as exc:
-            if use_connector_token and admin_token and opencti_token != admin_token:
-                logger.warning("miniflux_connector_token_invalid_fallback error=%s", exc)
-                opencti_token = admin_token
-                self.helper = _build_helper(opencti_token)
-            else:
-                raise
+        self.helper = _build_helper(opencti_token)
         self.fallback_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN", "")
         self.interval = int(os.getenv("CONNECTOR_RUN_INTERVAL_SECONDS", "600"))
         self.lookback_days = int(os.getenv("MINIFLUX_INITIAL_LOOKBACK_DAYS", "31"))
@@ -207,6 +181,11 @@ class MinifluxConnector:
         self.dedup_days = int(os.getenv("DEDUP_LOOKBACK_DAYS_MINIFLUX", "7"))
         self.dedup_threshold = float(os.getenv("DEDUP_SIMILARITY_MINIFLUX", "0.85"))
         self.state = StateStore("/data/state.json")
+        mapping_path = os.getenv("TI_MAPPING_DB", "/data/mapping/ti-mapping.sqlite")
+        self.mapping = MappingStore(mapping_path)
+        self.allow_title_fallback = os.getenv("TI_ALLOW_TITLE_FALLBACK", "false").lower() == "true"
+        default_confidence = os.getenv("TI_CONFIDENCE_IMPORT", "").strip()
+        self.default_confidence = int(default_confidence) if default_confidence else None
         self.client = OpenCTIClient(opencti_url, opencti_token, fallback_token=self.fallback_token)
 
     def _resolve_author(self, key: str, name: str, identity_type: str) -> str | None:
@@ -271,10 +250,6 @@ class MinifluxConnector:
 
                 source_url = canonicalize_url(entry.get("url") or "")
                 url_digest = url_hash(source_url)
-                if url_digest and not self.state.remember_hash("miniflux", url_digest):
-                    continue
-                if source_url and self.client.report_exists_by_external_reference(source_url):
-                    continue
 
                 text = extract_main_text(entry.get("content") or "")
                 if _text_too_short(text):
@@ -284,35 +259,8 @@ class MinifluxConnector:
                 text = format_readable_text(text)
                 if _text_too_short(text):
                     text = "No data from source."
-                summary = None
-                if text and text != "No data from source." and not _text_too_short(text):
-                    summary = summarize_text(text)
-                if summary:
-                    text = f"{text}\n\nSummary:\n{summary}"
-                cves = extract_cves(text)
-                iocs = extract_iocs(text)
-                orgs = extract_organizations(text)
-                products = extract_products(text)
-                entities = extract_entities(text)
-                people = entities.get("persons", [])
-                orgs = sorted(set(orgs).union(entities.get("organizations", [])))
-                products = sorted(set(products).union(entities.get("products", [])))
-                iocs["countries"] = sorted(set(iocs["countries"]).union(entities.get("countries", [])))
+                content_fp = content_fingerprint(text)
                 labels = ["source:miniflux"] + source_labels("miniflux")
-                labels += [f"cve:{cve}" for cve in cves]
-                labels += [f"ioc:url" for _ in iocs["urls"]]
-                labels += [f"ioc:domain" for _ in iocs["domains"]]
-                labels += apply_label_rules(text)
-                labels = sorted({label for label in labels if label})
-                label_entities = extract_label_entities(labels)
-                cves = sorted(set(cves).union(label_entities["cves"]))
-                iocs["urls"] = sorted(set(iocs["urls"]).union(label_entities["urls"]))
-                iocs["domains"] = sorted(set(iocs["domains"]).union(label_entities["domains"]))
-                iocs["ipv4"] = sorted(set(iocs["ipv4"]).union(label_entities["ipv4"]))
-                iocs["asns"] = sorted(set(iocs["asns"]).union(label_entities["asns"]))
-                iocs["countries"] = sorted(set(iocs["countries"]).union(label_entities["countries"]))
-                orgs = sorted(set(orgs).union(label_entities["organizations"]))
-                products = sorted(set(products).union(label_entities["products"]))
                 feed_title = ""
                 feed_meta = entry.get("feed") or {}
                 if isinstance(feed_meta, dict):
@@ -341,6 +289,9 @@ class MinifluxConnector:
                     org_key = _author_key("miniflux-org", feed_id, source_url, org_name)
                     org_id = self._resolve_author(org_key, org_name, "Organization")
 
+                confidence = source_confidence("miniflux")
+                if confidence is None:
+                    confidence = self.default_confidence
                 report = ReportInput(
                     title=entry.get("title") or "Miniflux entry",
                     description=text,
@@ -350,87 +301,60 @@ class MinifluxConnector:
                     author=author_name or None,
                     created_by_id=author_id,
                     labels=labels,
-                    confidence=source_confidence("miniflux"),
+                    confidence=confidence,
                     external_id=url_digest or None,
                 )
-                duplicate = find_best_match(report.title, candidates, self.dedup_threshold)
-                if duplicate:
-                    new_conf = report.confidence or 0
-                    old_conf = duplicate.confidence or 0
-                    if source_url and new_conf < old_conf:
-                        self.client.add_external_reference_to_report(
-                            duplicate.report_id,
-                            report.source_name,
-                            source_url,
-                            report.external_id,
-                        )
-                        logger.info(
-                            "report_skipped source=miniflux reason=lower_confidence_duplicate title=%s",
-                            report.title,
-                        )
-                        continue
-
-                report_id = self.client.create_report(report)
-                if report_id:
-                    logger.info("report_created source=miniflux id=%s title=%s", report_id, report.title)
+                external_ids: list[tuple[str, str]] = []
+                guid = entry.get("guid")
+                if guid:
+                    external_ids.append(("rss_guid", str(guid)))
+                if entry_id:
+                    external_ids.append(("miniflux_entry", str(entry_id)))
+                candidate = CandidateIdentity(
+                    urls=[source_url] if source_url else [],
+                    external_ids=external_ids,
+                    content_fp=content_fp or None,
+                    title=report.title,
+                    published=published_dt.isoformat(),
+                )
+                report_id, match_reason = resolve_canonical_id(
+                    self.mapping,
+                    candidate,
+                    allow_title_fallback=self.allow_title_fallback,
+                )
+                if not report_id and self.allow_title_fallback:
+                    duplicate = find_best_match(report.title, candidates, self.dedup_threshold)
                     if duplicate:
-                        self.client.create_relationship(report_id, duplicate.report_id, "related-to")
+                        report_id = duplicate.report_id
+                        match_reason = "title_similarity"
+                if not report_id:
+                    report_id = self.client.create_report(report)
+                if report_id:
+                    logger.info(
+                        "report_upserted source=miniflux id=%s title=%s match=%s",
+                        report_id,
+                        report.title,
+                        match_reason or "created",
+                    )
+                    existing_url_owner = self.mapping.get_by_url_hash(url_digest)
+                    store_identity_mappings(self.mapping, report_id, "Report", candidate)
+                    should_add_ref = True
+                    if url_digest:
+                        should_add_ref = self.state.remember_hash(
+                            "external_ref",
+                            f"{report_id}:{url_digest}",
+                        )
+                    if source_url and existing_url_owner is None and should_add_ref:
+                        self.client.add_external_reference_to_report(
+                            report_id,
+                            "miniflux",
+                            source_url,
+                            url_digest or None,
+                        )
                     for author_id in author_ids:
                         self.client.create_relationship(report_id, author_id, "related-to")
-                    for cve in cves:
-                        vuln_id = self.client.create_vulnerability(cve)
-                        if vuln_id:
-                            self.client.create_relationship(report_id, vuln_id, "related-to")
-                    for url in iocs["urls"]:
-                        obs_id = self.client.create_observable("Url", url)
-                        if obs_id:
-                            self.client.create_relationship(report_id, obs_id, "related-to")
-                    for domain in iocs["domains"]:
-                        obs_id = self.client.create_observable("Domain-Name", domain)
-                        if obs_id:
-                            self.client.create_relationship(report_id, obs_id, "related-to")
-                    for ip in iocs["ipv4"]:
-                        obs_id = self.client.create_observable(_observable_type_for_ip(ip), ip)
-                        if obs_id:
-                            self.client.create_relationship(report_id, obs_id, "related-to")
-                    for asn in iocs["asns"]:
-                        obs_id = self.client.create_observable("Autonomous-System", asn)
-                        if obs_id:
-                            self.client.create_relationship(report_id, obs_id, "related-to")
-                    for country in iocs["countries"]:
-                        country_id = self.client.create_country(country)
-                        if country_id:
-                            self.client.create_relationship(report_id, country_id, "related-to")
-                    for person in people:
-                        person_id = self.client.create_identity(person, "Individual")
-                        if person_id:
-                            self.client.create_relationship(report_id, person_id, "related-to")
                     if org_id:
                         self.client.create_relationship(report_id, org_id, "related-to")
-                    for name in orgs:
-                        org_entity = self.client.create_identity(name, "Organization")
-                        if org_entity:
-                            self.client.create_relationship(report_id, org_entity, "related-to")
-                    for name in products:
-                        software_id = self.client.create_software(name)
-                        if software_id:
-                            self.client.create_relationship(report_id, software_id, "related-to")
-                    for name in label_entities["malware"]:
-                        malware_id = self.client.create_malware(name)
-                        if malware_id:
-                            self.client.create_relationship(report_id, malware_id, "related-to")
-                    for name in label_entities["tools"]:
-                        tool_id = self.client.create_tool(name)
-                        if tool_id:
-                            self.client.create_relationship(report_id, tool_id, "related-to")
-                    for name in label_entities["threat_actors"]:
-                        actor_id = self.client.create_threat_actor(name)
-                        if actor_id:
-                            self.client.create_relationship(report_id, actor_id, "related-to")
-                    for name in label_entities["attack_patterns"]:
-                        attack_id = self.client.create_attack_pattern(name)
-                        if attack_id:
-                            self.client.create_relationship(report_id, attack_id, "related-to")
                 else:
                     logger.info("report_skipped source=miniflux reason=create_failed title=%s", report.title)
                 if published_dt > max_published_dt or (

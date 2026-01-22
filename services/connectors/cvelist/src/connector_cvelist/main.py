@@ -5,10 +5,12 @@ import logging
 import os
 import subprocess
 import time
+from datetime import timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional, TypedDict
 
 import httpx
+from dateutil import parser as date_parser
 from pycti import OpenCTIConnectorHelper
 
 from connectors_common.state_store import StateStore
@@ -20,10 +22,6 @@ EPSS_DEFAULT_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.g
 EPSS_DEFAULT_REFRESH_SECONDS = 24 * 60 * 60
 
 def _select_opencti_token() -> str:
-    use_connector_token = os.getenv("OPENCTI_USE_CONNECTOR_TOKEN", "").lower() == "true"
-    connector_token = os.getenv("OPENCTI_TOKEN", "")
-    if use_connector_token and connector_token and connector_token != "changeme":
-        return connector_token
     return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
 
 
@@ -196,6 +194,24 @@ def _cvss_score_to_opencti(score: Any) -> int | None:
     return int(value)
 
 
+def _normalize_opencti_date(value: str) -> str | None:
+    if not value or not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    try:
+        parsed = date_parser.isoparse(cleaned)
+    except (ValueError, TypeError):
+        try:
+            parsed = date_parser.parse(cleaned)
+        except (ValueError, TypeError):
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.isoformat()
+
+
 def _extract_cvss(containers: Iterable[dict[str, Any]]) -> dict[str, Any]:
     for container in containers:
         metrics = container.get("metrics") if isinstance(container, dict) else None
@@ -312,7 +328,9 @@ def _extract_cve(payload: dict[str, Any], epss_scores: dict[str, dict[str, float
         fields["x_opencti_cwe"] = cwes
     date_published = meta.get("datePublished")
     if isinstance(date_published, str) and date_published.strip():
-        fields["x_opencti_first_seen_active"] = date_published.strip()
+        normalized = _normalize_opencti_date(date_published)
+        if normalized:
+            fields["x_opencti_first_seen_active"] = normalized
 
     affected = []
     for container in container_items:
@@ -641,7 +659,6 @@ class CveListConnector:
     def __init__(self) -> None:
         opencti_url = os.getenv("OPENCTI_URL", "http://opencti:8080")
         admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
-        use_connector_token = os.getenv("OPENCTI_USE_CONNECTOR_TOKEN", "").lower() == "true"
         opencti_token = _select_opencti_token()
         if not opencti_token:
             raise RuntimeError("cvelist_missing_token")
@@ -667,15 +684,7 @@ class CveListConnector:
             }
             return OpenCTIConnectorHelper(config)
 
-        try:
-            self.helper = _build_helper(opencti_token)
-        except Exception as exc:
-            if use_connector_token and admin_token and opencti_token != admin_token:
-                logger.warning("cvelist_connector_token_invalid_fallback error=%s", exc)
-                opencti_token = admin_token
-                self.helper = _build_helper(opencti_token)
-            else:
-                raise
+        self.helper = _build_helper(opencti_token)
         self.repo_url = os.getenv("CVELIST_REPO_URL", "https://github.com/CVEProject/cvelistV5.git")
         self.branch = os.getenv("CVELIST_BRANCH", "main")
         self.interval = int(

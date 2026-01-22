@@ -326,21 +326,8 @@ def main() -> None:
     FALLBACK_TOKEN = app_admin_token
     admin_token = _resolve_admin_token(admin_token, app_admin_token)
 
-    accounts = {
-        "Miniflux Connector": os.getenv("OPENCTI_MINIFLUX_TOKEN", ""),
-        "Readwise Connector": os.getenv("OPENCTI_READWISE_TOKEN", ""),
-        "Zotero Connector": os.getenv("OPENCTI_ZOTERO_TOKEN", ""),
-    }
-
     if os.getenv("OPENCTI_INIT_SERVICE_ACCOUNTS", "").lower() == "true":
-        for name, token in accounts.items():
-            if not token:
-                logger.warning("missing_token name=%s", name)
-                continue
-            if _existing_service_account(url, admin_token, name):
-                logger.info("service_account_exists name=%s", name)
-                continue
-            _create_service_account(url, admin_token, name, token)
+        logger.info("service_account_init_skipped reason=connector_tokens_removed")
     else:
         logger.info("service_account_init_disabled")
 

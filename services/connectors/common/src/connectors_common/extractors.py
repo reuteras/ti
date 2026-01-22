@@ -377,6 +377,23 @@ def extract_label_entities(labels: Iterable[str]) -> dict[str, list[str]]:
     return {key: sorted(values) for key, values in entries.items()}
 
 
+def empty_label_entities() -> dict[str, list[str]]:
+    return {
+        "cves": [],
+        "urls": [],
+        "domains": [],
+        "ipv4": [],
+        "asns": [],
+        "countries": [],
+        "organizations": [],
+        "products": [],
+        "malware": [],
+        "tools": [],
+        "threat_actors": [],
+        "attack_patterns": [],
+    }
+
+
 def extract_iocs(text: str) -> dict[str, list[str]]:
     text = text or ""
     return {
@@ -387,4 +404,16 @@ def extract_iocs(text: str) -> dict[str, list[str]]:
         "countries": extract_countries(text),
         "sha256": sorted(set(SHA256_PATTERN.findall(text))),
         "md5": sorted(set(MD5_PATTERN.findall(text))),
+    }
+
+
+def empty_iocs() -> dict[str, list[str]]:
+    return {
+        "urls": [],
+        "domains": [],
+        "ipv4": [],
+        "asns": [],
+        "countries": [],
+        "sha256": [],
+        "md5": [],
     }

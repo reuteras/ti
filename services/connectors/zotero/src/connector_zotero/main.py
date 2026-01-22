@@ -1,5 +1,4 @@
 import hashlib
-import ipaddress
 import logging
 import os
 import time
@@ -8,33 +7,37 @@ from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 
 import httpx
+from dateutil import parser as date_parser
 from pycti import OpenCTIConnectorHelper
 
 from connectors_common.dedup import find_best_match, prepare_candidates
+from connectors_common.fingerprint import content_fingerprint
+from connectors_common.identity import CandidateIdentity, resolve_canonical_id, store_identity_mappings
+from connectors_common.mapping_store import MappingStore
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
-from connectors_common.enrichment import apply_label_rules, source_confidence, source_labels
-from connectors_common.extractors import (
-    extract_cves,
-    extract_label_entities,
-    extract_iocs,
-    extract_organizations,
-    extract_products,
-)
+from connectors_common.enrichment import source_confidence, source_labels
 from connectors_common.state_store import StateStore
-from connectors_common.llm import summarize_text, extract_entities
 from connectors_common.denylist import filter_values
 from connectors_common.text_utils import extract_main_text, format_readable_text
-from connectors_common.url_utils import canonicalize_url, url_hash
+from connectors_common.url_utils import canonicalize_url, normalize_doi, url_hash
 
 logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
 logger = logging.getLogger(__name__)
 
+_URL_RE = re.compile(r"https?://[^\s<>\"]+")
 
-def _observable_type_for_ip(value: str) -> str:
-    try:
-        return "IPv6-Addr" if ipaddress.ip_address(value).version == 6 else "IPv4-Addr"
-    except ValueError:
-        return "IPv4-Addr"
+
+def _clean_url(value: str) -> str:
+    if not value:
+        return ""
+    return value.strip(".,;:!?)}]>'\"")
+
+
+def _extract_urls(text: str) -> set[str]:
+    if not text:
+        return set()
+    urls = {_clean_url(match) for match in _URL_RE.findall(text)}
+    return {url for url in urls if url}
 
 
 def _split_authors(value: str | None) -> list[str]:
@@ -46,10 +49,6 @@ def _split_authors(value: str | None) -> list[str]:
 
 
 def _select_opencti_token() -> str:
-    use_connector_token = os.getenv("OPENCTI_USE_CONNECTOR_TOKEN", "").lower() == "true"
-    connector_token = os.getenv("OPENCTI_TOKEN", "")
-    if use_connector_token and connector_token and connector_token != "changeme":
-        return connector_token
     return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
 
 
@@ -61,6 +60,18 @@ def _author_key(prefix: str, source_url: str, name: str) -> str:
         digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
         return f"{prefix}:unknown:{digest}"
     return ""
+
+
+def _parse_zotero_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = date_parser.parse(value)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def fetch_items(api_key: str, library_type: str, library_id: str, since_version: str | None) -> tuple[list[dict], str | None]:
@@ -128,7 +139,6 @@ class ZoteroConnector:
         self.library_type = os.getenv("ZOTERO_LIBRARY_TYPE", "user")
         opencti_url = os.getenv("OPENCTI_URL", "http://opencti:8080")
         admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
-        use_connector_token = os.getenv("OPENCTI_USE_CONNECTOR_TOKEN", "").lower() == "true"
         opencti_token = _select_opencti_token()
         if not opencti_token:
             raise RuntimeError("zotero_missing_token")
@@ -154,21 +164,21 @@ class ZoteroConnector:
             }
             return OpenCTIConnectorHelper(config)
 
-        try:
-            self.helper = _build_helper(opencti_token)
-        except Exception as exc:
-            if use_connector_token and admin_token and opencti_token != admin_token:
-                logger.warning("zotero_connector_token_invalid_fallback error=%s", exc)
-                opencti_token = admin_token
-                self.helper = _build_helper(opencti_token)
-            else:
-                raise
+        self.helper = _build_helper(opencti_token)
         self.fallback_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN", "")
         self.briefing_url = os.getenv("BRIEFING_SERVICE_URL", "http://briefing:8088")
         self.interval = int(os.getenv("CONNECTOR_RUN_INTERVAL_SECONDS", "600"))
         self.dedup_days = int(os.getenv("DEDUP_LOOKBACK_DAYS_ZOTERO", "7"))
         self.dedup_threshold = float(os.getenv("DEDUP_SIMILARITY_ZOTERO", "0.85"))
         self.state = StateStore("/data/state.json")
+        mapping_path = os.getenv("TI_MAPPING_DB", "/data/mapping/ti-mapping.sqlite")
+        self.mapping = MappingStore(mapping_path)
+        self.allow_title_fallback = os.getenv("TI_ALLOW_TITLE_FALLBACK", "false").lower() == "true"
+        self.zotero_lookback_days = int(os.getenv("TI_ZOTERO_LOOKBACK_DAYS", "30"))
+        link_strategy = os.getenv("TI_LINK_STRATEGY", "none").lower()
+        self.link_strategy = link_strategy if link_strategy in {"report", "reference_only", "none"} else "none"
+        default_confidence = os.getenv("TI_CONFIDENCE_IMPORT", "").strip()
+        self.default_confidence = int(default_confidence) if default_confidence else None
         self.client = OpenCTIClient(opencti_url, opencti_token, fallback_token=self.fallback_token)
 
     def _resolve_author(self, key: str, name: str, identity_type: str) -> str | None:
@@ -189,6 +199,9 @@ class ZoteroConnector:
             logger.warning("zotero_not_configured")
             return
         since_version = self.state.get("last_version")
+        cutoff_dt = None
+        if not since_version and self.zotero_lookback_days > 0:
+            cutoff_dt = datetime.now(timezone.utc) - timedelta(days=self.zotero_lookback_days)
         approved_tags = fetch_approved_tags(self.briefing_url)
         approved_collections = fetch_approved_collections(self.briefing_url)
         if not approved_tags and not approved_collections:
@@ -197,8 +210,17 @@ class ZoteroConnector:
         recent_reports = self.client.list_reports_since(datetime.now(timezone.utc) - timedelta(days=self.dedup_days))
         candidates = prepare_candidates(recent_reports)
         items, last_version = fetch_items(self.api_key, self.library_type, self.library_id, since_version)
+        annotations = []
         for item in items:
             data = item.get("data", {})
+            if data.get("itemType") == "annotation":
+                annotations.append(item)
+                continue
+            if cutoff_dt:
+                date_value = data.get("dateModified") or data.get("dateAdded") or data.get("date")
+                parsed = _parse_zotero_date(date_value)
+                if parsed and parsed < cutoff_dt:
+                    continue
             tag_values = set()
             for tag in data.get("tags") or []:
                 if isinstance(tag, dict):
@@ -213,48 +235,11 @@ class ZoteroConnector:
                     continue
             source_url = canonicalize_url(data.get("url") or "")
             url_digest = url_hash(source_url)
-            if url_digest and not self.state.remember_hash("zotero", url_digest):
-                logger.info(
-                    "report_skipped source=zotero reason=duplicate_hash title=%s",
-                    data.get("title") or "Zotero item",
-                )
-                continue
-            if source_url and self.client.report_exists_by_external_reference(source_url):
-                logger.info(
-                    "report_skipped source=zotero reason=existing_external_reference title=%s",
-                    data.get("title") or "Zotero item",
-                )
-                continue
 
             text = extract_main_text(data.get("abstractNote") or "")
             text = format_readable_text(text)
-            summary = summarize_text(text)
-            if summary:
-                text = f"{text}\n\nSummary:\n{summary}"
-            cves = extract_cves(text)
-            iocs = extract_iocs(text)
-            orgs = extract_organizations(text)
-            products = extract_products(text)
-            entities = extract_entities(text)
-            people = entities.get("persons", [])
-            orgs = sorted(set(orgs).union(entities.get("organizations", [])))
-            products = sorted(set(products).union(entities.get("products", [])))
-            iocs["countries"] = sorted(set(iocs["countries"]).union(entities.get("countries", [])))
+            content_fp = content_fingerprint(text)
             labels = ["source:zotero"] + source_labels("zotero")
-            labels += [f"cve:{cve}" for cve in cves]
-            labels += [f"ioc:url" for _ in iocs["urls"]]
-            labels += [f"ioc:domain" for _ in iocs["domains"]]
-            labels += apply_label_rules(text)
-            labels = sorted({label for label in labels if label})
-            label_entities = extract_label_entities(labels)
-            cves = sorted(set(cves).union(label_entities["cves"]))
-            iocs["urls"] = sorted(set(iocs["urls"]).union(label_entities["urls"]))
-            iocs["domains"] = sorted(set(iocs["domains"]).union(label_entities["domains"]))
-            iocs["ipv4"] = sorted(set(iocs["ipv4"]).union(label_entities["ipv4"]))
-            iocs["asns"] = sorted(set(iocs["asns"]).union(label_entities["asns"]))
-            iocs["countries"] = sorted(set(iocs["countries"]).union(label_entities["countries"]))
-            orgs = sorted(set(orgs).union(label_entities["organizations"]))
-            products = sorted(set(products).union(label_entities["products"]))
 
             creators = data.get("creators") or []
             author = None
@@ -281,96 +266,132 @@ class ZoteroConnector:
                     extra_id = self._resolve_author(extra_key, name, "Individual")
                     if extra_id:
                         author_ids.append(extra_id)
-            report = ReportInput(
-                title=data.get("title") or "Zotero item",
-                description=text,
-                published=data.get("date"),
-                source_name="zotero",
-                source_url=source_url or None,
-                author=author or None,
-                created_by_id=author_id,
-                labels=labels,
-                confidence=source_confidence("zotero"),
-                external_id=url_digest or None,
+            title = data.get("title") or "Zotero item"
+            published = data.get("date")
+            item_key = item.get("key") or data.get("key")
+            external_ids: list[tuple[str, str]] = []
+            if item_key:
+                external_ids.append(("zotero_item", str(item_key)))
+            doi = normalize_doi(data.get("DOI") or data.get("doi") or "")
+            url_candidates = [source_url] if source_url else []
+            if doi:
+                url_candidates.append(f"https://doi.org/{doi}")
+            confidence = source_confidence("zotero")
+            if confidence is None:
+                confidence = self.default_confidence
+            candidate = CandidateIdentity(
+                doi=doi or None,
+                urls=url_candidates,
+                external_ids=external_ids,
+                content_fp=content_fp or None,
+                title=title,
+                published=published,
             )
-            duplicate = find_best_match(report.title, candidates, self.dedup_threshold)
-            if duplicate:
-                new_conf = report.confidence or 0
-                old_conf = duplicate.confidence or 0
-                if source_url and new_conf < old_conf:
-                    self.client.add_external_reference_to_report(
-                        duplicate.report_id,
-                        report.source_name,
-                        source_url,
-                        report.external_id,
-                    )
-                    logger.info(
-                        "report_skipped source=zotero reason=lower_confidence_duplicate title=%s",
-                        report.title,
-                    )
-                    continue
-
-            report_id = self.client.create_report(report)
-            if report_id:
-                logger.info("report_created source=zotero id=%s title=%s", report_id, report.title)
+            report_id, match_reason = resolve_canonical_id(
+                self.mapping,
+                candidate,
+                allow_title_fallback=self.allow_title_fallback,
+            )
+            if not report_id and self.allow_title_fallback:
+                duplicate = find_best_match(title, candidates, self.dedup_threshold)
                 if duplicate:
-                    self.client.create_relationship(report_id, duplicate.report_id, "related-to")
+                    report_id = duplicate.report_id
+                    match_reason = "title_similarity"
+            if not report_id:
+                report = ReportInput(
+                    title=title,
+                    description=text,
+                    published=published,
+                    source_name="zotero",
+                    source_url=source_url or None,
+                    author=author or None,
+                    created_by_id=author_id,
+                    labels=labels,
+                    confidence=confidence,
+                    external_id=url_digest or None,
+                )
+                report_id = self.client.create_report(report)
+            if report_id:
+                logger.info(
+                    "report_upserted source=zotero id=%s title=%s match=%s",
+                    report_id,
+                    title,
+                    match_reason or "created",
+                )
+                existing_url_owner = self.mapping.get_by_url_hash(url_digest)
+                existing_doi_owner = self.mapping.get_by_doi(doi) if doi else None
+                store_identity_mappings(self.mapping, report_id, "Report", candidate)
+                should_add_ref = True
+                if url_digest:
+                    should_add_ref = self.state.remember_hash(
+                        "external_ref",
+                        f"{report_id}:{url_digest}",
+                    )
+                if source_url and existing_url_owner is None and should_add_ref:
+                    self.client.add_external_reference_to_report(
+                        report_id,
+                        "zotero",
+                        source_url,
+                        url_digest or None,
+                    )
+                should_add_doi = True
+                if doi:
+                    should_add_doi = self.state.remember_hash(
+                        "external_ref",
+                        f"{report_id}:doi:{doi}",
+                    )
+                if doi and existing_doi_owner is None and should_add_doi:
+                    doi_url = f"https://doi.org/{doi}"
+                    self.client.add_external_reference_to_report(
+                        report_id,
+                        "doi",
+                        doi_url,
+                        doi,
+                    )
                 for author_id in author_ids:
                     self.client.create_relationship(report_id, author_id, "related-to")
-                for cve in cves:
-                    vuln_id = self.client.create_vulnerability(cve)
-                    if vuln_id:
-                        self.client.create_relationship(report_id, vuln_id, "related-to")
-                for url in iocs["urls"]:
-                    obs_id = self.client.create_observable("Url", url)
-                    if obs_id:
-                        self.client.create_relationship(report_id, obs_id, "related-to")
-                for domain in iocs["domains"]:
-                    obs_id = self.client.create_observable("Domain-Name", domain)
-                    if obs_id:
-                        self.client.create_relationship(report_id, obs_id, "related-to")
-                for ip in iocs["ipv4"]:
-                    obs_id = self.client.create_observable(_observable_type_for_ip(ip), ip)
-                    if obs_id:
-                        self.client.create_relationship(report_id, obs_id, "related-to")
-                for asn in iocs["asns"]:
-                    obs_id = self.client.create_observable("Autonomous-System", asn)
-                    if obs_id:
-                        self.client.create_relationship(report_id, obs_id, "related-to")
-                for country in iocs["countries"]:
-                    country_id = self.client.create_country(country)
-                    if country_id:
-                        self.client.create_relationship(report_id, country_id, "related-to")
-                for person in people:
-                    person_id = self.client.create_identity(person, "Individual")
-                    if person_id:
-                        self.client.create_relationship(report_id, person_id, "related-to")
-                for name in orgs:
-                    org_entity = self.client.create_identity(name, "Organization")
-                    if org_entity:
-                        self.client.create_relationship(report_id, org_entity, "related-to")
-                for name in products:
-                    software_id = self.client.create_software(name)
-                    if software_id:
-                        self.client.create_relationship(report_id, software_id, "related-to")
-                for name in label_entities["malware"]:
-                    malware_id = self.client.create_malware(name)
-                    if malware_id:
-                        self.client.create_relationship(report_id, malware_id, "related-to")
-                for name in label_entities["tools"]:
-                    tool_id = self.client.create_tool(name)
-                    if tool_id:
-                        self.client.create_relationship(report_id, tool_id, "related-to")
-                for name in label_entities["threat_actors"]:
-                    actor_id = self.client.create_threat_actor(name)
-                    if actor_id:
-                        self.client.create_relationship(report_id, actor_id, "related-to")
-                for name in label_entities["attack_patterns"]:
-                    attack_id = self.client.create_attack_pattern(name)
-                    if attack_id:
-                        self.client.create_relationship(report_id, attack_id, "related-to")
             else:
-                logger.info("report_skipped source=zotero reason=create_failed title=%s", report.title)
+                logger.info("report_skipped source=zotero reason=create_failed title=%s", title)
+        for item in annotations:
+            data = item.get("data", {})
+            parent_key = data.get("parentItem")
+            if not parent_key:
+                continue
+            report_id = self.mapping.get_by_external_id("zotero_item", str(parent_key))
+            if not report_id:
+                continue
+            annotation_text = (data.get("annotationText") or "").strip()
+            annotation_comment = (data.get("annotationComment") or "").strip()
+            page_label = data.get("annotationPageLabel")
+            annotation_key = item.get("key") or data.get("key")
+            if annotation_key:
+                external_id = f"{parent_key}:{annotation_key}"
+            else:
+                fingerprint = f"{parent_key}:{page_label or ''}:{annotation_text.lower()[:200]}"
+                external_id = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+            existing_note = self.mapping.get_by_external_id("zotero_annot", external_id)
+            if existing_note:
+                continue
+            lines = []
+            if annotation_text:
+                lines.append(annotation_text)
+            if annotation_comment:
+                lines.append(f"Note: {annotation_comment}")
+            if page_label:
+                lines.append(f"Page: {page_label}")
+            if parent_key:
+                lines.append(f"Source: zotero:{parent_key}")
+            content = "\n".join(lines)
+            if not content:
+                continue
+            note_id = self.client.create_note(
+                content,
+                object_refs=[report_id],
+                labels=["source:zotero"],
+            )
+            if note_id and external_id:
+                self.mapping.upsert_external_id("zotero_annot", external_id, note_id, "Note")
+            self._handle_extracted_links(report_id, annotation_text, annotation_comment)
         if last_version and last_version != since_version:
             self.state.set("last_version", last_version)
         logger.info("zotero_run_completed items=%s", len(items))
@@ -382,6 +403,65 @@ class ZoteroConnector:
         while True:
             self._run()
             time.sleep(self.interval)
+
+    def _handle_extracted_links(self, report_id: str, annotation_text: str, annotation_comment: str) -> None:
+        if self.link_strategy == "none":
+            return
+        urls = set()
+        urls.update(_extract_urls(annotation_text or ""))
+        urls.update(_extract_urls(annotation_comment or ""))
+        if not urls:
+            return
+        linked_ids: set[str] = set()
+        for raw_url in urls:
+            canonical = canonicalize_url(raw_url)
+            if not canonical:
+                continue
+            digest = url_hash(canonical)
+            if not digest:
+                continue
+            existing_id = self.mapping.get_by_url_hash(digest)
+            if existing_id:
+                if existing_id != report_id and existing_id not in linked_ids:
+                    self.client.create_relationship(report_id, existing_id, "related-to")
+                    linked_ids.add(existing_id)
+                continue
+            if self.link_strategy == "reference_only":
+                should_add_ref = self.state.remember_hash(
+                    "external_ref",
+                    f"{report_id}:{digest}",
+                )
+                if should_add_ref:
+                    self.client.add_external_reference_to_report(report_id, "zotero", canonical, digest)
+                continue
+            if self.link_strategy == "report":
+                linked_id = self._resolve_or_create_linked_report(canonical)
+                if linked_id and linked_id != report_id and linked_id not in linked_ids:
+                    self.client.create_relationship(report_id, linked_id, "related-to")
+                    linked_ids.add(linked_id)
+
+    def _resolve_or_create_linked_report(self, url: str) -> str | None:
+        candidate = CandidateIdentity(urls=[url])
+        report_id, _ = resolve_canonical_id(self.mapping, candidate, allow_title_fallback=False)
+        if report_id:
+            return report_id
+        title = url
+        confidence = source_confidence("zotero")
+        if confidence is None:
+            confidence = self.default_confidence
+        report = ReportInput(
+            title=title,
+            description="Referenced link from Zotero annotation.",
+            published=None,
+            source_name="zotero-link",
+            source_url=url,
+            labels=["source:zotero"],
+            confidence=confidence,
+        )
+        report_id = self.client.create_report(report)
+        if report_id:
+            store_identity_mappings(self.mapping, report_id, "Report", candidate)
+        return report_id
 
 
 def main() -> None:

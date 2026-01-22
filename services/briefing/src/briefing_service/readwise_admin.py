@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def refresh_tags(storage: Storage, max_pages: int = 5) -> int:
-    token = os.getenv("READWISE_TOKEN", "")
+    token = os.getenv("READWISE_API_KEY", "")
     if not token:
         logger.warning("readwise_not_configured")
         return 0

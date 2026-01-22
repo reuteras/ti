@@ -18,18 +18,18 @@ We use OpenCTI as the central CTI knowledge base (graph + STIX 2.1 + ATT&CK data
 - connector-miniflux
 - connector-readwise
 - connector-zotero
+- connector-enrich-text
 
-Each connector:
-- keeps its own cursor (state) in a persistent volume (SQLite or JSON file)
+Each import connector:
+- keeps its own cursor (state) in a persistent volume
 - fetches new/updated items since last cursor
-- extracts content (HTML/PDF text where possible)
-- extracts observables (IOCs) and CVEs
-- creates STIX objects and relationships in OpenCTI:
-  - Report (or Note) for the item
-  - External Reference (URL) to original source
-  - Observables (Domain-Name, Url, IPv4-Addr, File hash, etc.)
-  - Vulnerability object for CVEs
-  - Optional: Indicator objects later (not MVP)
+- normalizes identifiers (URL/DOI/external IDs) and resolves canonical Reports via the mapping store
+- creates Reports + External References + Notes for highlights/annotations
+- defers CVE/IOC extraction to the enrichment connector
+
+The enrichment connector:
+- reads recent Reports/Notes
+- extracts CVEs/IOCs and creates relationships
 
 ### 3. Briefing service (custom)
 - A FastAPI service that:
@@ -45,14 +45,16 @@ Each connector:
 - Produces "watch alerts" included in daily briefings
 
 ## Data flow
-1) Connector pulls new items -> normalize -> enrich -> push to OpenCTI.
-2) Briefing service queries OpenCTI -> builds daily briefing -> publishes RSS/HTML -> stores artifacts.
-3) Reports (weekly/monthly/quarterly/yearly) are generated from stored briefing artifacts + OpenCTI aggregates.
+1) Import connector pulls new items -> normalize -> push to OpenCTI.
+2) Enrichment connector scans new Reports/Notes -> adds CVEs/IOCs.
+3) Briefing service queries OpenCTI -> builds daily briefing -> publishes RSS/HTML -> stores artifacts.
+4) Reports (weekly/monthly/quarterly/yearly) are generated from stored briefing artifacts + OpenCTI aggregates.
 
 ## MVP constraints
 - Keep connector logic deterministic and idempotent:
   - stable external_id per item
   - dedup by source_item_id and content hash
 - Avoid over-creating entities early:
-  - Create "Report" + "ExternalReference" + CVE + Observables
+  - Import connectors create Report + ExternalReference + Notes
+  - Enrichment connector handles CVEs/Observables
   - ATT&CK linking is Phase 2 (after ingestion is stable)

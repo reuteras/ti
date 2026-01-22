@@ -1,11 +1,12 @@
 [project]
-name = "connectors-common"
+name = "connector-enrich-text"
 version = "0.1.0"
-description = "Common utilities for OpenCTI connectors"
+description = "Text enrichment connector"
 requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.27.0",
-  "trafilatura>=1.8.0",
+  "python-dateutil>=2.9.0",
+  "pycti>=6.9.0,<7.0.0",
 ]
 
 [project.optional-dependencies]
@@ -17,7 +18,7 @@ dev = [
 package = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/connectors_common"]
+packages = ["src/connector_enrich_text"]
 
 [build-system]
 requires = ["hatchling"]

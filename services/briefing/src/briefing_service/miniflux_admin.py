@@ -49,7 +49,7 @@ def fetch_categories(base_url: str, token: str) -> dict[int, MinifluxCategory]:
 
 def refresh_feeds(storage: Storage) -> int:
     base_url = os.getenv("MINIFLUX_URL", "")
-    token = os.getenv("MINIFLUX_TOKEN", "")
+    token = os.getenv("MINIFLUX_API_KEY", "")
     if not base_url or not token:
         logger.warning("miniflux_not_configured")
         return 0

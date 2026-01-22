@@ -12,19 +12,17 @@ Each connector is a Python service with:
 - CONNECTOR_NAME
 - CONNECTOR_SCOPE (e.g., "miniflux", "readwise", "zotero")
 - CONNECTOR_RUN_INTERVAL_SECONDS
+- TI_MAPPING_DB (shared mapping SQLite path)
+- TI_ALLOW_TITLE_FALLBACK (enable title+published fallback)
+- TI_CONFIDENCE_IMPORT (default confidence when source map missing)
 
 ### Common internal modules
-- client_opencti.py: wrapper for OpenCTI GraphQL mutations
-- state_store.py: SQLite/JSON cursor store
-- extractors/
-  - html.py (readability/trafilatura)
-  - pdf.py (pypdf/pdfminer fallback)
-- enrichers/
-  - ioc_extract.py
-  - cve_extract.py
-- stix/
-  - mappers.py (source item -> STIX objects)
-  - relationships.py
+- connectors_common/opencti_client.py: wrapper for OpenCTI GraphQL mutations
+- connectors_common/state_store.py: SQLite/JSON cursor store
+- connectors_common/url_utils.py: URL normalization + hashing
+- connectors_common/fingerprint.py: content fingerprinting
+- connectors_common/mapping_store.py: shared SQLite ID mapping
+- connectors_common/identity.py: canonical identity resolution
 
 ## STIX mapping (MVP)
 For each source item:
@@ -37,12 +35,8 @@ For each source item:
   - source_name: "miniflux" / "readwise" / "zotero"
   - url: original URL (if any)
 - Link Report -> External Reference
-- Extract CVEs:
-  - Create Vulnerability objects (name="CVE-YYYY-NNNN")
-  - Link Report -> Vulnerability ("related-to")
-- Extract Observables:
-  - Domain-Name, Url, IPv4-Addr, IPv6-Addr, File (hashes), Email-Addr
-  - Link Report -> Observable ("related-to")
+- Create Note evidence objects for highlights/annotations
+- CVE/IOC extraction is handled by the `connector-enrich-text` service
 
 ## External OpenCTI connectors
 The stack also runs official OpenCTI connectors for public datasets and enrichment:
@@ -54,7 +48,6 @@ The stack also runs official OpenCTI connectors for public datasets and enrichme
 - FIRST EPSS (CVSS exploitability probability)
 - MalwareBazaar
 - Malpedia
-- Montysecurity C2-Tracker
 - MISP Feed (CIRCL OSINT)
 - OpenCTI Datasets
 - RansomwareLive
@@ -68,7 +61,7 @@ Note: NVD is not used; CVE coverage comes primarily from CISA KEV + OpenCTI Data
 ## Miniflux connector
 ### Inputs
 - MINIFLUX_URL
-- MINIFLUX_TOKEN
+- MINIFLUX_API_KEY
 
 ### Incremental strategy
 - Cursor based on miniflux entry IDs and/or "updated_at".
@@ -80,13 +73,14 @@ Note: NVD is not used; CVE coverage comes primarily from CISA KEV + OpenCTI Data
 
 ## Readwise connector
 ### Inputs
-- READWISE_TOKEN
+- READWISE_API_KEY
 
 ### Incremental strategy
 - Use "updatedAfter" style parameter if available; otherwise poll and diff by updated timestamp
-- Treat highlights as:
-  - either separate Reports OR
-  - Notes linked to the parent source (Phase 2)
+- Treat highlights as Notes linked to the parent Report
+### Optional link extraction
+- TI_LINK_STRATEGY=report|reference_only|none
+- TI_READWISE_LOOKBACK_DAYS=14 (initial backfill window)
 
 ## Zotero connector
 ### Inputs
@@ -94,14 +88,21 @@ Note: NVD is not used; CVE coverage comes primarily from CISA KEV + OpenCTI Data
 
 ### Incremental strategy
 - Zotero has a library version; store last seen version.
-- For PDF attachments:
-  - download metadata; optionally download file (config)
-  - extract text and store as blob
+- Treat annotations as Notes linked to the parent Report
+- TI_ZOTERO_LOOKBACK_DAYS=30 (initial backfill window)
+- TI_LINK_STRATEGY=report|reference_only|none (optional link extraction from annotations)
+
+## Enrich Text connector
+Adds CVEs/IOCs for recent Reports and Notes and links them back to the container Report.
+- Inputs: recent Reports/Notes from OpenCTI
+- Output: Vulnerability/Observable relationships
+- Filters by label via `TI_ENRICH_SOURCES` and recency via `ENRICH_LOOKBACK_DAYS`
+- Optional LLM entity extraction via `ENRICHMENT_LLM_*` (persons, orgs, products, countries)
 
 ## Acceptance criteria
 - Each connector can run in isolation (`docker compose up connector-miniflux`)
 - It ingests at least one real item and creates:
-  - Report + ExternalReference + at least one observable or CVE if present
+  - Report + ExternalReference + Notes (if highlights/annotations exist)
 - Re-running does not create duplicates.
 
 ## CVE List V5 connector

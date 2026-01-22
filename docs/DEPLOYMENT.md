@@ -5,6 +5,7 @@
   - OpenCTI stack
   - OpenCTI worker (queue ingestion)
   - core connectors (miniflux/readwise/zotero)
+  - enrichment connector (enrich-text)
   - external enrichment/import connectors
   - briefing service
 
@@ -24,6 +25,7 @@
   - services/connectors/miniflux/Dockerfile
   - services/connectors/readwise/Dockerfile
   - services/connectors/zotero/Dockerfile
+  - services/connectors/enrich_text/Dockerfile
 
 ## Acceptance criteria
 - `docker compose up -d --build` works

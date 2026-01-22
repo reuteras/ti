@@ -136,9 +136,6 @@ services:
       - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
       - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
       - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - OPENCTI_MINIFLUX_TOKEN=${OPENCTI_MINIFLUX_TOKEN}
-      - OPENCTI_READWISE_TOKEN=${OPENCTI_READWISE_TOKEN}
-      - OPENCTI_ZOTERO_TOKEN=${OPENCTI_ZOTERO_TOKEN}
       - OPENCTI_USER_EMAIL=${OPENCTI_USER_EMAIL}
       - OPENCTI_USER_PASSWORD=${OPENCTI_USER_PASSWORD}
       - OPENCTI_USER_NAME=${OPENCTI_USER_NAME}
@@ -162,8 +159,8 @@ services:
       - BRIEFING_SCHEDULE_MINUTE=${BRIEFING_SCHEDULE_MINUTE:-5}
       - BRIEFING_BASE_URL=${BRIEFING_BASE_URL:-http://localhost:8088}
       - MINIFLUX_URL=${MINIFLUX_URL}
-      - MINIFLUX_TOKEN=${MINIFLUX_TOKEN}
-      - READWISE_TOKEN=${READWISE_TOKEN}
+      - MINIFLUX_API_KEY=${MINIFLUX_API_KEY}
+      - READWISE_API_KEY=${READWISE_API_KEY}
       - ZOTERO_API_KEY=${ZOTERO_API_KEY}
       - ZOTERO_LIBRARY_ID=${ZOTERO_LIBRARY_ID}
       - ZOTERO_LIBRARY_TYPE=${ZOTERO_LIBRARY_TYPE:-user}
@@ -190,7 +187,6 @@ services:
       - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
       - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
       - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - OPENCTI_USE_CONNECTOR_TOKEN=false
       - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
       - CONNECTOR_ID=${MINIFLUX_CONNECTOR_ID}
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
@@ -199,9 +195,11 @@ services:
       - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-600}
       - MINIFLUX_URL=${MINIFLUX_URL}
-      - MINIFLUX_TOKEN=${MINIFLUX_TOKEN}
+      - MINIFLUX_API_KEY=${MINIFLUX_API_KEY}
+      - TI_MAPPING_DB=${TI_MAPPING_DB:-/data/mapping/ti-mapping.sqlite}
     volumes:
       - miniflux-state:/data
+      - mapping-data:/data/mapping
     depends_on:
       opencti:
         condition: service_healthy
@@ -221,7 +219,6 @@ services:
       - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
       - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
       - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - OPENCTI_USE_CONNECTOR_TOKEN=false
       - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
       - CONNECTOR_ID=${READWISE_CONNECTOR_ID}
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
@@ -229,9 +226,11 @@ services:
       - CONNECTOR_SCOPE=readwise
       - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-600}
-      - READWISE_TOKEN=${READWISE_TOKEN}
+      - READWISE_API_KEY=${READWISE_API_KEY}
+      - TI_MAPPING_DB=${TI_MAPPING_DB:-/data/mapping/ti-mapping.sqlite}
     volumes:
       - readwise-state:/data
+      - mapping-data:/data/mapping
     depends_on:
       opencti:
         condition: service_healthy
@@ -251,7 +250,6 @@ services:
       - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
       - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
       - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - OPENCTI_USE_CONNECTOR_TOKEN=false
       - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
       - CONNECTOR_ID=${ZOTERO_CONNECTOR_ID}
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
@@ -262,8 +260,40 @@ services:
       - ZOTERO_API_KEY=${ZOTERO_API_KEY}
       - ZOTERO_LIBRARY_ID=${ZOTERO_LIBRARY_ID}
       - ZOTERO_LIBRARY_TYPE=${ZOTERO_LIBRARY_TYPE:-user}
+      - TI_MAPPING_DB=${TI_MAPPING_DB:-/data/mapping/ti-mapping.sqlite}
     volumes:
       - zotero-state:/data
+      - mapping-data:/data/mapping
+    depends_on:
+      opencti:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  connector-enrich-text:
+    build:
+      context: services/connectors
+      dockerfile: enrich_text/Dockerfile
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${ENRICH_TEXT_CONNECTOR_ID}
+      - CONNECTOR_TYPE=INTERNAL_ENRICHMENT
+      - CONNECTOR_NAME=enrich-text
+      - CONNECTOR_SCOPE=text-enrichment
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-900}
+      - ENRICH_LOOKBACK_DAYS=${ENRICH_LOOKBACK_DAYS:-7}
+      - TI_ENRICH_SOURCES=${TI_ENRICH_SOURCES:-miniflux,readwise,zotero}
+    volumes:
+      - enrich-text-state:/data
     depends_on:
       opencti:
         condition: service_healthy
@@ -283,7 +313,6 @@ services:
       - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
       - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
       - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - OPENCTI_USE_CONNECTOR_TOKEN=false
       - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
       - CONNECTOR_ID=${CVELIST_CONNECTOR_ID}
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
@@ -425,17 +454,6 @@ services:
       - CONNECTOR_PULL_HISTORY=false
       - CONNECTOR_HISTORY_START_YEAR=2023
       - CONNECTOR_CREATE_THREAT_ACTOR=false
-    depends_on:
-      opencti:
-        condition: service_healthy
-
-  connector-montysecurity-c2-tracker:
-    image: opencti/connector-montysecurity-c2-tracker:latest
-    env_file:
-      - .env
-    environment:
-      - opencti_url=${OPENCTI_URL:-http://opencti:8080}
-      - opencti_c2tracker_token=${MONTYSECURITY_C2TRACKER_TOKEN}
     depends_on:
       opencti:
         condition: service_healthy
@@ -681,4 +699,6 @@ volumes:
   miniflux-state:
   readwise-state:
   zotero-state:
+  enrich-text-state:
+  mapping-data:
   cvelist-state:

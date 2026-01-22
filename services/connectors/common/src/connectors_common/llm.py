@@ -55,6 +55,7 @@ def extract_entities(text: str, max_chars: int = 4000) -> dict[str, list[str]]:
 
         Rules:
         - Only include entities explicitly mentioned in the text.
+        - Persons should include full names when possible (first+last).
         - Use canonical country names (e.g., US/USA/U.S. => United States).
         - Products include software and technologies (e.g., Adobe ColdFusion).
         - Do not include cities.

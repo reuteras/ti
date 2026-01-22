@@ -108,6 +108,8 @@ class OpenCTIClient:
                 name
                 confidence
                 created_at
+                description
+                objectLabel { value }
                 externalReferences {
                   edges { node { url source_name external_id } }
                 }
@@ -140,6 +142,63 @@ class OpenCTIClient:
             node = edge.get("node", {})
             reports.append(node)
         return reports
+
+    def list_notes_since(self, since: datetime) -> list[dict[str, Any]]:
+        if not self.admin_token:
+            return []
+        query = """
+        query Notes($from: Any!) {
+          notes(
+            filters: {mode: and, filterGroups: [], filters: [{key: "created_at", values: [$from], operator: gt}]}
+            first: 200
+            orderBy: created_at
+            orderMode: desc
+          ) {
+            edges {
+              node {
+                id
+                content
+                created_at
+                objectLabel { value }
+                objects {
+                  edges {
+                    node {
+                      ... on BasicObject {
+                        id
+                        entity_type
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                data = self._post(query, {"from": since.isoformat()})
+                break
+            except Exception as exc:
+                last_error = exc
+                if _is_es_overloaded(exc):
+                    if attempt < 2:
+                        time.sleep(2**attempt)
+                        continue
+                    logger.warning("opencti_note_list_skipped_es_overloaded")
+                    return []
+                logger.warning("opencti_note_list_failed error=%s", exc)
+                return []
+        else:
+            if last_error:
+                logger.warning("opencti_note_list_failed error=%s", last_error)
+            return []
+        notes = []
+        for edge in data.get("notes", {}).get("edges", []):
+            node = edge.get("node", {})
+            notes.append(node)
+        return notes
 
     def add_external_reference_to_report(self, report_id: str, source_name: str, url: str, external_id: str | None) -> None:
         if not self.admin_token or not report_id or not url:
@@ -489,6 +548,39 @@ class OpenCTIClient:
             self._post(mutation, {"input": payload})
         except Exception as exc:
             logger.warning("opencti_relationship_add_failed error=%s", exc)
+
+    def create_note(
+        self,
+        content: str,
+        object_refs: list[str] | None = None,
+        created_by_id: str | None = None,
+        labels: list[str] | None = None,
+        confidence: int | None = None,
+    ) -> str | None:
+        if not self.admin_token or not content:
+            return None
+        mutation = """
+        mutation NoteAdd($input: NoteAddInput!) {
+          noteAdd(input: $input) { id }
+        }
+        """
+        payload: dict[str, Any] = {"content": escape_markdown(content.strip())}
+        if object_refs:
+            payload["objectRefs"] = object_refs
+        if created_by_id:
+            payload["createdBy"] = created_by_id
+        if confidence is not None:
+            payload["confidence"] = confidence
+        if labels:
+            label_ids = self._ensure_label_ids(labels)
+            if label_ids:
+                payload["objectLabel"] = label_ids
+        try:
+            data = self._post(mutation, {"input": payload})
+            return data.get("noteAdd", {}).get("id")
+        except Exception as exc:
+            logger.warning("opencti_note_add_failed error=%s", exc)
+            return None
 
     def create_report(self, report: ReportInput) -> str | None:
         if not self.admin_token:
