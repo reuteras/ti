@@ -61,6 +61,7 @@ class OpenCTIClient:
         self._external_refs_supported = True
         self._observables_supported = True
         self._software_supported = True
+        self._software_checked = False
         self._country_supported = True
         self._label_cache: dict[str, str] = {}
 
@@ -344,6 +345,12 @@ class OpenCTIClient:
     def create_software(self, name: str) -> str | None:
         if not self.admin_token or not self._software_supported:
             return None
+        if not self._software_checked:
+            self._software_checked = True
+            if not self._supports_mutation("softwareAdd"):
+                self._software_supported = False
+                logger.warning("opencti_software_disabled")
+                return None
         query = """
         query SoftwareByName($name: Any!) {
           stixCoreObjects(
@@ -389,6 +396,27 @@ class OpenCTIClient:
             logger.warning("opencti_software_add_failed error=%s", exc)
             return None
         return data.get("softwareAdd", {}).get("id")
+
+    def _supports_mutation(self, mutation_name: str) -> bool:
+        query = """
+        query MutationSupport {
+          __schema {
+            mutationType {
+              fields { name }
+            }
+          }
+        }
+        """
+        try:
+            data = self._post(query, {})
+        except Exception as exc:
+            logger.warning("opencti_schema_query_failed error=%s", exc)
+            return False
+        fields = data.get("__schema", {}).get("mutationType", {}).get("fields", [])
+        for field in fields:
+            if field.get("name") == mutation_name:
+                return True
+        return False
 
     def create_country(self, name: str) -> str | None:
         if not self.admin_token or not self._country_supported:
@@ -513,40 +541,93 @@ class OpenCTIClient:
             except ValueError:
                 normalized_value = value
 
-        legacy_mutation = """
-        mutation ObservableAdd($type: String!, $value: String!) {
-          stixCyberObservableAdd(type: $type, value: $value) { id }
+        if normalized_type in {"Domain-Name", "DomainName"}:
+            normalized_value = normalized_value.rstrip(".")
+            if not re.match(r"(?i)^(?:[a-z0-9-]+\.)+[a-z]{2,}$", normalized_value):
+                logger.warning("opencti_observable_add_skipped type=%s value=%s", normalized_type, normalized_value)
+                return None
+
+        field_map = {
+            "IPv4-Addr": "IPv4Addr",
+            "IPv6-Addr": "IPv6Addr",
+            "Domain-Name": "DomainName",
+            "DomainName": "DomainName",
+            "Url": "Url",
+            "Autonomous-System": "AutonomousSystem",
+            "AutonomousSystem": "AutonomousSystem",
+        }
+        field = field_map.get(normalized_type)
+        if not field:
+            logger.warning("opencti_observable_add_skipped type=%s", normalized_type)
+            return None
+
+        input_payload: dict[str, Any] = {"value": normalized_value}
+        if field == "AutonomousSystem":
+            raw = normalized_value.upper().lstrip("AS")
+            try:
+                input_payload = {"number": int(raw)}
+            except ValueError:
+                logger.warning("opencti_observable_add_skipped type=%s value=%s", normalized_type, normalized_value)
+                return None
+
+        mutation = f"""
+        mutation ObservableAdd($type: String!, ${field}: {field}AddInput) {{
+          stixCyberObservableAdd(type: $type, {field}: ${field}) {{ id }}
+        }}
+        """
+        try:
+            data = self._post(mutation, {"type": normalized_type, field: input_payload})
+        except Exception as exc:
+            message = str(exc)
+            if "Unknown argument" in message or "Cannot query field" in message or "GRAPHQL_VALIDATION_FAILED" in message:
+                self._observables_supported = False
+                logger.warning("opencti_observable_add_disabled")
+                return None
+            if "Observable is not correctly formatted" in message:
+                logger.warning("opencti_observable_add_failed error=%s", exc)
+                return None
+            logger.warning("opencti_observable_add_failed error=%s", exc)
+            return None
+        return data.get("stixCyberObservableAdd", {}).get("id")
+
+    def create_artifact(
+        self,
+        sha256: str,
+        name: str | None = None,
+        mime_type: str | None = None,
+        url: str | None = None,
+        additional_names: list[str] | None = None,
+    ) -> str | None:
+        if not self.admin_token:
+            return None
+        if not self._observables_supported:
+            return None
+        if not sha256:
+            return None
+        names = [name] if name else []
+        if additional_names:
+            names.extend([item for item in additional_names if item])
+        input_payload: dict[str, Any] = {
+            "hashes": [{"algorithm": "SHA-256", "hash": sha256}],
+            "mime_type": mime_type,
+            "url": url,
+            "x_opencti_additional_names": names or None,
+        }
+        mutation = """
+        mutation ObservableAdd($type: String!, $Artifact: ArtifactAddInput) {
+          stixCyberObservableAdd(type: $type, Artifact: $Artifact) { id }
         }
         """
         try:
-            data = self._post(legacy_mutation, {"type": normalized_type, "value": normalized_value})
+            data = self._post(mutation, {"type": "Artifact", "Artifact": input_payload})
         except Exception as exc:
             message = str(exc)
-            if "Unknown argument" in message and "type" in message:
-                normalized = normalized_type.replace("-", "")
-                field_map = {
-                    "IPv4Addr": "IPv4Addr",
-                    "IPv6Addr": "IPv6Addr",
-                    "DomainName": "DomainName",
-                    "Url": "Url",
-                    "AutonomousSystem": "AutonomousSystem",
-                }
-                field = field_map.get(normalized)
-                if field:
-                    input_mutation = f"""
-                    mutation ObservableAdd($input: {field}AddInput!) {{
-                      stixCyberObservableAdd({field}: $input) {{ id }}
-                    }}
-                    """
-                    try:
-                        data = self._post(input_mutation, {"input": {"value": normalized_value}})
-                        return data.get("stixCyberObservableAdd", {}).get("id")
-                    except Exception as fallback_exc:
-                        logger.warning("opencti_observable_add_failed error=%s", fallback_exc)
-                        return None
-            if "stixCyberObservableAdd" in message and "type" in message:
+            if "Unknown argument" in message or "Cannot query field" in message or "GRAPHQL_VALIDATION_FAILED" in message:
                 self._observables_supported = False
                 logger.warning("opencti_observable_add_disabled")
+                return None
+            if "Observable is not correctly formatted" in message:
+                logger.warning("opencti_observable_add_failed error=%s", exc)
                 return None
             logger.warning("opencti_observable_add_failed error=%s", exc)
             return None

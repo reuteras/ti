@@ -185,6 +185,7 @@ class MinifluxConnector:
         mapping_path = os.getenv("TI_MAPPING_DB", "/data/mapping/ti-mapping.sqlite")
         self.mapping = MappingStore(mapping_path)
         self.allow_title_fallback = os.getenv("TI_ALLOW_TITLE_FALLBACK", "false").lower() == "true"
+        self.store_html_note = os.getenv("STORE_HTML_NOTE", "false").lower() == "true"
         default_confidence = os.getenv("TI_CONFIDENCE_IMPORT", "").strip()
         self.default_confidence = int(default_confidence) if default_confidence else None
         self.client = OpenCTIClient(opencti_url, opencti_token, fallback_token=self.fallback_token)
@@ -259,7 +260,10 @@ class MinifluxConnector:
                 source_url = canonicalize_url(entry.get("url") or "")
                 url_digest = url_hash(source_url)
 
-                text = extract_main_text(entry.get("content") or "")
+                content_html = entry.get("content") or ""
+                summary_html = entry.get("summary") or ""
+                base_html = content_html or summary_html
+                text = extract_main_text(base_html)
                 if _text_too_short(text):
                     source_html = _fetch_source_text(source_url)
                     if source_html:
@@ -273,6 +277,11 @@ class MinifluxConnector:
                 feed_meta = entry.get("feed") or {}
                 if isinstance(feed_meta, dict):
                     feed_title = feed_meta.get("title") or ""
+                    feed_url = canonicalize_url(feed_meta.get("feed_url") or "")
+                    site_url = canonicalize_url(feed_meta.get("site_url") or "")
+                else:
+                    feed_url = ""
+                    site_url = ""
                 if not feed_title:
                     feed_title = entry.get("feed_title") or ""
                 author_name = (entry.get("author") or "").strip()
@@ -359,10 +368,55 @@ class MinifluxConnector:
                             source_url,
                             url_digest or None,
                         )
+                    if source_url and entry_id:
+                        should_add_entry_ref = self.state.remember_hash(
+                            "external_ref",
+                            f"{report_id}:entry:{entry_id}",
+                        )
+                        if should_add_entry_ref:
+                            self.client.add_external_reference_to_report(
+                                report_id,
+                                "miniflux_entry",
+                                source_url,
+                                str(entry_id),
+                            )
+                    if feed_url:
+                        should_add_feed_ref = self.state.remember_hash(
+                            "external_ref",
+                            f"{report_id}:feed:{feed_id}:{feed_url}",
+                        )
+                        if should_add_feed_ref:
+                            self.client.add_external_reference_to_report(
+                                report_id,
+                                "miniflux_feed",
+                                feed_url,
+                                str(feed_id) if feed_id else None,
+                            )
+                    if site_url and not feed_url:
+                        should_add_site_ref = self.state.remember_hash(
+                            "external_ref",
+                            f"{report_id}:site:{site_url}",
+                        )
+                        if should_add_site_ref:
+                            self.client.add_external_reference_to_report(
+                                report_id,
+                                "miniflux_site",
+                                site_url,
+                                None,
+                            )
                     for author_id in author_ids:
                         self.client.create_relationship(report_id, author_id, "related-to")
                     if org_id:
                         self.client.create_relationship(report_id, org_id, "related-to")
+                    if self.store_html_note:
+                        html_note = content_html or summary_html
+                        if html_note:
+                            note_body = f"Miniflux HTML\n\n{html_note}"
+                            self.client.create_note(
+                                note_body,
+                                object_refs=[report_id],
+                                labels=["source:miniflux", "html"],
+                            )
                 else:
                     logger.info("report_skipped source=miniflux reason=create_failed title=%s", report.title)
                 if published_dt > max_published_dt or (

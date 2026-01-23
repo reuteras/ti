@@ -36,13 +36,13 @@ OpenCTI’s “official” way for connectors is typically via their connector f
 
 ## Manuall connectors
 
-From OpenCTI Integrations Library, [hub](https://hub.filigran.io/app/service/opencti_integrations).
+From OpenCTI Integrations Library, [hub](https://hub.filigran.io/cybersecurity-solutions/open-cti-integrations).
 
-- Threatview.io - C2 Hunt Feed
-- Threatview.io - Bitcoin Address Intel
-- Spamhaus DROP list
-- LolBas Project
-- James Brine Threat Feed Endpoint
-- Emerging Threats Blockrules Compromised IPs
+- Blocklist.de
 - Dan.me.uk (EXIT Nodes only)
-:
+- Emerging Threats Blockrules Compromised IPs
+- James Brine Threat Feed Endpoint
+- LolBas Project
+- Spamhaus DROP list
+- Threatview.io - Bitcoin Address Intel
+- Threatview.io - C2 Hunt Feed

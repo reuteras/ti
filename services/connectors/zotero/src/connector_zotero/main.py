@@ -5,10 +5,12 @@ import time
 import re
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import httpx
 from dateutil import parser as date_parser
 from pycti import OpenCTIConnectorHelper
+from pyzotero import zotero, zotero_errors
 
 from connectors_common.dedup import find_best_match, prepare_candidates
 from connectors_common.fingerprint import content_fingerprint
@@ -75,18 +77,83 @@ def _parse_zotero_date(value: str | None) -> datetime | None:
     return parsed
 
 
-def fetch_items(api_key: str, library_type: str, library_id: str, since_version: str | None) -> tuple[list[dict], str | None]:
-    base_url = f"https://api.zotero.org/{library_type}s/{library_id}/items"
+def fetch_items(client: zotero.Zotero, since_version: str | None) -> tuple[list[dict], str | None, int]:
+    first_page = client.items(limit=50, since=since_version)
+    items = list(first_page)
+    page_count = 1
+    for page in client.iterfollow():
+        if not page:
+            break
+        items.extend(page)
+        page_count += 1
+    last_version = getattr(client, "last_modified_version", None)
+    logger.info("zotero_items pages=%s items=%s", page_count, len(items))
+    return items, last_version, page_count
+
+
+def fetch_item_by_key(client: zotero.Zotero, item_key: str) -> dict | None:
+    if not item_key:
+        return None
+    try:
+        return client.item(item_key)
+    except zotero_errors.ResourceNotFound:
+        return None
+
+
+def fetch_fulltext_changes(
+    api_key: str, library_type: str, library_id: str, since_version: str | None
+) -> tuple[list[str], str | None, int]:
+    base_url = f"https://api.zotero.org/{library_type}s/{library_id}/fulltext"
     headers = {"Zotero-API-Key": api_key}
-    params = {"limit": 50}
+    params = {}
     if since_version:
         params["since"] = since_version
+    keys: list[str] = []
+    last_version: str | None = None
+    page_count = 0
     with httpx.Client(timeout=30) as client:
-        response = client.get(base_url, headers=headers, params=params)
+        next_url = base_url
+        next_params = params
+        while next_url:
+            response = client.get(next_url, headers=headers, params=next_params)
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict):
+                keys.extend([key for key in payload.keys() if isinstance(key, str)])
+            last_version = response.headers.get("Last-Modified-Version") or last_version
+            next_link = response.links.get("next")
+            next_url = next_link.get("url") if next_link else None
+            next_params = None
+            page_count += 1
+    logger.info("zotero_fulltext_changes pages=%s keys=%s", page_count, len(keys))
+    return keys, last_version, page_count
+
+
+def fetch_attachment_fulltext(
+    api_key: str, library_type: str, library_id: str, item_key: str
+) -> dict[str, Any] | None:
+    if not item_key:
+        return None
+    base_url = f"https://api.zotero.org/{library_type}s/{library_id}/items/{item_key}/fulltext"
+    headers = {"Zotero-API-Key": api_key}
+    with httpx.Client(timeout=30) as client:
+        response = client.get(base_url, headers=headers)
+        if response.status_code == 404:
+            return None
         response.raise_for_status()
-        items = response.json()
-        last_version = response.headers.get("Last-Modified-Version")
-    return items, last_version
+        payload = response.json()
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def normalize_fulltext(text: str) -> str:
+    if not text:
+        return ""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = "\n".join(line.rstrip() for line in normalized.split("\n"))
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized
 
 
 def fetch_approved_tags(briefing_url: str) -> set[str]:
@@ -180,7 +247,13 @@ class ZoteroConnector:
         self.link_strategy = link_strategy if link_strategy in {"report", "reference_only", "none"} else "none"
         default_confidence = os.getenv("TI_CONFIDENCE_IMPORT", "").strip()
         self.default_confidence = int(default_confidence) if default_confidence else None
+        self.note_max_chars = int(os.getenv("NOTE_MAX_CHARS", "150000"))
         self.client = OpenCTIClient(opencti_url, opencti_token, fallback_token=self.fallback_token)
+        self.zotero = (
+            zotero.Zotero(self.library_id, self.library_type, self.api_key)
+            if self.api_key and self.library_id
+            else None
+        )
 
     def _resolve_author(self, key: str, name: str, identity_type: str) -> str | None:
         if not key or not name:
@@ -195,12 +268,185 @@ class ZoteroConnector:
             self.state.set(map_key, author_id)
         return author_id
 
+    def _extract_tags_and_collections(self, data: dict) -> tuple[set[str], set[str]]:
+        tag_values = set()
+        for tag in data.get("tags") or []:
+            if isinstance(tag, dict):
+                tag_value = tag.get("tag")
+            else:
+                tag_value = tag
+            if isinstance(tag_value, str) and tag_value.strip():
+                tag_values.add(tag_value.strip())
+        collection_values = {str(cid) for cid in data.get("collections") or [] if str(cid).strip()}
+        return tag_values, collection_values
+
+    def _allowed_item(
+        self, data: dict, approved_tags: set[str], approved_collections: set[str]
+    ) -> bool:
+        if not approved_tags and not approved_collections:
+            return True
+        tag_values, collection_values = self._extract_tags_and_collections(data)
+        return bool(tag_values.intersection(approved_tags) or collection_values.intersection(approved_collections))
+
+    def _upsert_report(
+        self,
+        data: dict,
+        item_key: str | None,
+        candidates: list[dict],
+        approved_tags: set[str],
+        approved_collections: set[str],
+        cutoff_dt: datetime | None,
+    ) -> str | None:
+        if cutoff_dt:
+            date_value = data.get("dateModified") or data.get("dateAdded") or data.get("date")
+            parsed = _parse_zotero_date(date_value)
+            if parsed and parsed < cutoff_dt:
+                return None
+        if not self._allowed_item(data, approved_tags, approved_collections):
+            return None
+
+        source_url = canonicalize_url(data.get("url") or "")
+        url_digest = url_hash(source_url)
+
+        text = extract_main_text(data.get("abstractNote") or "")
+        text = format_readable_text(text)
+        content_fp = content_fingerprint(text)
+        labels = ["source:zotero"] + source_labels("zotero")
+
+        creators = data.get("creators") or []
+        author = None
+        if creators:
+            primary = creators[0]
+            if isinstance(primary, dict):
+                author = primary.get("name")
+                if not author:
+                    first = primary.get("firstName") or ""
+                    last = primary.get("lastName") or ""
+                    author = f"{first} {last}".strip()
+        author_ids: list[str] = []
+        authors = _split_authors(author)
+        author_id = None
+        if authors:
+            author = "; ".join(authors)
+            primary = authors[0]
+            author_key = _author_key("zotero", source_url, primary)
+            author_id = self._resolve_author(author_key, primary, "Individual")
+            if author_id:
+                author_ids.append(author_id)
+            for name in authors[1:]:
+                extra_key = _author_key("zotero", source_url, name)
+                extra_id = self._resolve_author(extra_key, name, "Individual")
+                if extra_id:
+                    author_ids.append(extra_id)
+        title = data.get("title") or "Zotero item"
+        published = data.get("date")
+        external_ids: list[tuple[str, str]] = []
+        if item_key:
+            external_ids.append(("zotero_item", str(item_key)))
+        doi = normalize_doi(data.get("DOI") or data.get("doi") or "")
+        url_candidates = [source_url] if source_url else []
+        if doi:
+            url_candidates.append(f"https://doi.org/{doi}")
+        confidence = source_confidence("zotero")
+        if confidence is None:
+            confidence = self.default_confidence
+        candidate = CandidateIdentity(
+            doi=doi or None,
+            urls=url_candidates,
+            external_ids=external_ids,
+            content_fp=content_fp or None,
+            title=title,
+            published=published,
+        )
+        report_id, match_reason = resolve_canonical_id(
+            self.mapping,
+            candidate,
+            allow_title_fallback=self.allow_title_fallback,
+        )
+        if not report_id and self.allow_title_fallback:
+            duplicate = find_best_match(title, candidates, self.dedup_threshold)
+            if duplicate:
+                report_id = duplicate.report_id
+                match_reason = "title_similarity"
+        if not report_id:
+            report = ReportInput(
+                title=title,
+                description=text,
+                published=published,
+                source_name="zotero",
+                source_url=source_url or None,
+                author=author or None,
+                created_by_id=author_id,
+                labels=labels,
+                confidence=confidence,
+                external_id=url_digest or None,
+            )
+            report_id = self.client.create_report(report)
+        if report_id:
+            logger.info(
+                "report_upserted source=zotero id=%s title=%s match=%s",
+                report_id,
+                title,
+                match_reason or "created",
+            )
+            existing_url_owner = self.mapping.get_by_url_hash(url_digest)
+            existing_doi_owner = self.mapping.get_by_doi(doi) if doi else None
+            store_identity_mappings(self.mapping, report_id, "Report", candidate)
+            should_add_ref = True
+            if url_digest:
+                should_add_ref = self.state.remember_hash(
+                    "external_ref",
+                    f"{report_id}:{url_digest}",
+                )
+            if source_url and existing_url_owner is None and should_add_ref:
+                self.client.add_external_reference_to_report(
+                    report_id,
+                    "zotero",
+                    source_url,
+                    url_digest or None,
+                )
+            should_add_doi = True
+            if doi:
+                should_add_doi = self.state.remember_hash(
+                    "external_ref",
+                    f"{report_id}:doi:{doi}",
+                )
+            if doi and existing_doi_owner is None and should_add_doi:
+                doi_url = f"https://doi.org/{doi}"
+                self.client.add_external_reference_to_report(
+                    report_id,
+                    "doi",
+                    doi_url,
+                    doi,
+                )
+            for author_id in author_ids:
+                self.client.create_relationship(report_id, author_id, "related-to")
+        else:
+            logger.info("report_skipped source=zotero reason=create_failed title=%s", title)
+        return report_id
+
+    def _build_note_chunks(self, title: str, metadata: str, content: str) -> list[tuple[str, str]]:
+        if not content:
+            return []
+        prefix = f"{metadata}\n\n"
+        max_chars = max(1000, self.note_max_chars)
+        chunks: list[str] = []
+        for start in range(0, len(content), max_chars):
+            chunks.append(content[start : start + max_chars])
+        total = len(chunks)
+        results = []
+        for idx, chunk in enumerate(chunks, start=1):
+            suffix = f" (part {idx}/{total})" if total > 1 else ""
+            results.append((f"{title}{suffix}", f"{prefix}{chunk}"))
+        return results
+
     def _run(self) -> None:
         if not self.api_key or not self.library_id:
             logger.warning("zotero_not_configured")
             return
         work = WorkTracker(self.helper, "Zotero import")
         since_version = self.state.get("last_version")
+        since_fulltext_version = self.state.get("last_fulltext_version")
         cutoff_dt = None
         if not since_version and self.zotero_lookback_days > 0:
             cutoff_dt = datetime.now(timezone.utc) - timedelta(days=self.zotero_lookback_days)
@@ -212,9 +458,13 @@ class ZoteroConnector:
             return
         recent_reports = self.client.list_reports_since(datetime.now(timezone.utc) - timedelta(days=self.dedup_days))
         candidates = prepare_candidates(recent_reports)
-        items, last_version = fetch_items(self.api_key, self.library_type, self.library_id, since_version)
+        if not self.zotero:
+            logger.warning("zotero_not_configured")
+            work.done("Zotero not configured")
+            return
+        items, last_version, item_pages = fetch_items(self.zotero, since_version)
         total_items = len(items)
-        work.log(f"items={total_items}")
+        work.log(f"items={total_items} pages={item_pages}")
         annotations = []
         last_progress = -1
         for idx, item in enumerate(items, start=1):
@@ -227,142 +477,8 @@ class ZoteroConnector:
             if data.get("itemType") == "annotation":
                 annotations.append(item)
                 continue
-            if cutoff_dt:
-                date_value = data.get("dateModified") or data.get("dateAdded") or data.get("date")
-                parsed = _parse_zotero_date(date_value)
-                if parsed and parsed < cutoff_dt:
-                    continue
-            tag_values = set()
-            for tag in data.get("tags") or []:
-                if isinstance(tag, dict):
-                    tag_value = tag.get("tag")
-                else:
-                    tag_value = tag
-                if isinstance(tag_value, str) and tag_value.strip():
-                    tag_values.add(tag_value.strip())
-            collection_values = {str(cid) for cid in data.get("collections") or [] if str(cid).strip()}
-            if approved_tags or approved_collections:
-                if not (tag_values.intersection(approved_tags) or collection_values.intersection(approved_collections)):
-                    continue
-            source_url = canonicalize_url(data.get("url") or "")
-            url_digest = url_hash(source_url)
-
-            text = extract_main_text(data.get("abstractNote") or "")
-            text = format_readable_text(text)
-            content_fp = content_fingerprint(text)
-            labels = ["source:zotero"] + source_labels("zotero")
-
-            creators = data.get("creators") or []
-            author = None
-            if creators:
-                primary = creators[0]
-                if isinstance(primary, dict):
-                    author = primary.get("name")
-                    if not author:
-                        first = primary.get("firstName") or ""
-                        last = primary.get("lastName") or ""
-                        author = f"{first} {last}".strip()
-            author_ids: list[str] = []
-            authors = _split_authors(author)
-            author_id = None
-            if authors:
-                author = "; ".join(authors)
-                primary = authors[0]
-                author_key = _author_key("zotero", source_url, primary)
-                author_id = self._resolve_author(author_key, primary, "Individual")
-                if author_id:
-                    author_ids.append(author_id)
-                for name in authors[1:]:
-                    extra_key = _author_key("zotero", source_url, name)
-                    extra_id = self._resolve_author(extra_key, name, "Individual")
-                    if extra_id:
-                        author_ids.append(extra_id)
-            title = data.get("title") or "Zotero item"
-            published = data.get("date")
             item_key = item.get("key") or data.get("key")
-            external_ids: list[tuple[str, str]] = []
-            if item_key:
-                external_ids.append(("zotero_item", str(item_key)))
-            doi = normalize_doi(data.get("DOI") or data.get("doi") or "")
-            url_candidates = [source_url] if source_url else []
-            if doi:
-                url_candidates.append(f"https://doi.org/{doi}")
-            confidence = source_confidence("zotero")
-            if confidence is None:
-                confidence = self.default_confidence
-            candidate = CandidateIdentity(
-                doi=doi or None,
-                urls=url_candidates,
-                external_ids=external_ids,
-                content_fp=content_fp or None,
-                title=title,
-                published=published,
-            )
-            report_id, match_reason = resolve_canonical_id(
-                self.mapping,
-                candidate,
-                allow_title_fallback=self.allow_title_fallback,
-            )
-            if not report_id and self.allow_title_fallback:
-                duplicate = find_best_match(title, candidates, self.dedup_threshold)
-                if duplicate:
-                    report_id = duplicate.report_id
-                    match_reason = "title_similarity"
-            if not report_id:
-                report = ReportInput(
-                    title=title,
-                    description=text,
-                    published=published,
-                    source_name="zotero",
-                    source_url=source_url or None,
-                    author=author or None,
-                    created_by_id=author_id,
-                    labels=labels,
-                    confidence=confidence,
-                    external_id=url_digest or None,
-                )
-                report_id = self.client.create_report(report)
-            if report_id:
-                logger.info(
-                    "report_upserted source=zotero id=%s title=%s match=%s",
-                    report_id,
-                    title,
-                    match_reason or "created",
-                )
-                existing_url_owner = self.mapping.get_by_url_hash(url_digest)
-                existing_doi_owner = self.mapping.get_by_doi(doi) if doi else None
-                store_identity_mappings(self.mapping, report_id, "Report", candidate)
-                should_add_ref = True
-                if url_digest:
-                    should_add_ref = self.state.remember_hash(
-                        "external_ref",
-                        f"{report_id}:{url_digest}",
-                    )
-                if source_url and existing_url_owner is None and should_add_ref:
-                    self.client.add_external_reference_to_report(
-                        report_id,
-                        "zotero",
-                        source_url,
-                        url_digest or None,
-                    )
-                should_add_doi = True
-                if doi:
-                    should_add_doi = self.state.remember_hash(
-                        "external_ref",
-                        f"{report_id}:doi:{doi}",
-                    )
-                if doi and existing_doi_owner is None and should_add_doi:
-                    doi_url = f"https://doi.org/{doi}"
-                    self.client.add_external_reference_to_report(
-                        report_id,
-                        "doi",
-                        doi_url,
-                        doi,
-                    )
-                for author_id in author_ids:
-                    self.client.create_relationship(report_id, author_id, "related-to")
-            else:
-                logger.info("report_skipped source=zotero reason=create_failed title=%s", title)
+            self._upsert_report(data, item_key, candidates, approved_tags, approved_collections, cutoff_dt)
         for item in annotations:
             data = item.get("data", {})
             parent_key = data.get("parentItem")
@@ -403,10 +519,136 @@ class ZoteroConnector:
             if note_id and external_id:
                 self.mapping.upsert_external_id("zotero_annot", external_id, note_id, "Note")
             self._handle_extracted_links(report_id, annotation_text, annotation_comment)
+        self._process_fulltext(
+            approved_tags,
+            approved_collections,
+            candidates,
+            since_fulltext_version,
+        )
         if last_version and last_version != since_version:
             self.state.set("last_version", last_version)
         logger.info("zotero_run_completed items=%s", len(items))
         work.done(f"items={len(items)}")
+
+    def _process_fulltext(
+        self,
+        approved_tags: set[str],
+        approved_collections: set[str],
+        candidates: list[dict],
+        since_fulltext_version: str | None,
+    ) -> None:
+        if not self.zotero:
+            return
+        pending = self.state.get("zotero_fulltext_pending", [])
+        if not isinstance(pending, list):
+            pending = []
+        try:
+            changed_keys, last_version, fulltext_pages = fetch_fulltext_changes(
+                self.api_key,
+                self.library_type,
+                self.library_id,
+                since_fulltext_version,
+            )
+        except Exception as exc:
+            logger.warning("zotero_fulltext_list_failed error=%s", exc)
+            return
+        logger.info("zotero_fulltext_pages pages=%s keys=%s", fulltext_pages, len(changed_keys))
+        keys = list(dict.fromkeys([*pending, *changed_keys]))
+        if not keys:
+            if last_version and last_version != since_fulltext_version:
+                self.state.set("last_fulltext_version", last_version)
+            return
+        remaining_pending: list[str] = []
+        for attachment_key in keys:
+            attachment = fetch_item_by_key(self.zotero, attachment_key)
+            if not attachment:
+                continue
+            data = attachment.get("data", {})
+            if data.get("itemType") != "attachment":
+                continue
+            parent_key = data.get("parentItem")
+            if not parent_key:
+                continue
+            fulltext_payload = fetch_attachment_fulltext(
+                self.api_key,
+                self.library_type,
+                self.library_id,
+                attachment_key,
+            )
+            if fulltext_payload is None:
+                remaining_pending.append(attachment_key)
+                continue
+            content = fulltext_payload.get("content") or ""
+            normalized = normalize_fulltext(content)
+            if not normalized.strip():
+                continue
+            content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+            if not self.state.remember_hash("zotero_fulltext", f"{attachment_key}:{content_hash}"):
+                continue
+
+            report_id = self.mapping.get_by_external_id("zotero_item", str(parent_key))
+            if not report_id:
+                parent_item = fetch_item_by_key(self.zotero, parent_key)
+                if not parent_item:
+                    continue
+                parent_data = parent_item.get("data", {})
+                report_id = self._upsert_report(
+                    parent_data,
+                    parent_key,
+                    candidates,
+                    approved_tags,
+                    approved_collections,
+                    cutoff_dt=None,
+                )
+            if not report_id:
+                continue
+
+            attachment_title = data.get("title") or data.get("filename") or f"Attachment {attachment_key}"
+            artifact_id = self.client.create_artifact(
+                content_hash,
+                name=attachment_title,
+                url=None,
+                mime_type=None,
+                additional_names=[f"zotero:{attachment_key}", f"zotero_parent:{parent_key}"],
+            )
+            if artifact_id:
+                self.client.create_relationship(report_id, artifact_id, "related-to")
+
+            doi = normalize_doi((data.get("DOI") or data.get("doi") or ""))
+            source_url = canonicalize_url(data.get("url") or "")
+            metadata = "\n".join(
+                [
+                    f"zotero_attachment_key: {attachment_key}",
+                    f"zotero_parent_key: {parent_key}",
+                    f"doi: {doi}" if doi else "doi:",
+                    f"url: {source_url}" if source_url else "url:",
+                    f"indexed_pages: {fulltext_payload.get('indexedPages')}",
+                    f"total_pages: {fulltext_payload.get('totalPages')}",
+                    f"retrieved_at: {datetime.now(timezone.utc).isoformat()}",
+                    f"content_sha256: {content_hash}",
+                ]
+            )
+            note_title = f"Zotero fulltext: {attachment_title}"
+            chunks = self._build_note_chunks(note_title, metadata, normalized)
+            for title, note_content in chunks:
+                note_id = self.client.create_note(
+                    f"{title}\n{note_content}",
+                    object_refs=[ref for ref in [report_id, artifact_id] if ref],
+                    labels=["source:zotero"],
+                )
+                if note_id:
+                    self.mapping.upsert_external_id(
+                        "zotero_fulltext",
+                        f"{attachment_key}:{content_hash}:{title}",
+                        note_id,
+                        "Note",
+                    )
+        if remaining_pending:
+            self.state.set("zotero_fulltext_pending", remaining_pending)
+        else:
+            self.state.set("zotero_fulltext_pending", [])
+        if last_version and last_version != since_fulltext_version:
+            self.state.set("last_fulltext_version", last_version)
 
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):

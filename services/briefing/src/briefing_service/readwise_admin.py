@@ -14,29 +14,23 @@ def refresh_tags(storage: Storage, max_pages: int = 5) -> int:
         logger.warning("readwise_not_configured")
         return 0
     reader = ReadwiseReader(token=token)
-    page_cursor = None
-    page = 0
     tags: set[str] = set()
+    max_docs = max_pages * 100 if max_pages > 0 else None
+    doc_count = 0
 
-    while True:
-        params: dict[str, str] = {}
-        if page_cursor:
-            params["pageCursor"] = page_cursor
-        response = reader._make_get_request(params)
-        for doc in response.results:
-            doc_tags = getattr(doc, "tags", None)
-            if isinstance(doc_tags, dict):
-                for key, tag in doc_tags.items():
-                    name = getattr(tag, "name", None) or key
-                    if isinstance(name, str) and name.strip():
-                        tags.add(name.strip())
-            elif isinstance(doc_tags, list):
-                for name in doc_tags:
-                    if isinstance(name, str) and name.strip():
-                        tags.add(name.strip())
-        page_cursor = response.next_page_cursor
-        page += 1
-        if not page_cursor or page >= max_pages:
+    for doc in reader.iter_documents(retry_on_429=True):
+        doc_tags = getattr(doc, "tags", None)
+        if isinstance(doc_tags, dict):
+            for key, tag in doc_tags.items():
+                name = getattr(tag, "name", None) or key
+                if isinstance(name, str) and name.strip():
+                    tags.add(name.strip())
+        elif isinstance(doc_tags, list):
+            for name in doc_tags:
+                if isinstance(name, str) and name.strip():
+                    tags.add(name.strip())
+        doc_count += 1
+        if max_docs is not None and doc_count >= max_docs:
             break
 
     count = 0

@@ -8,6 +8,10 @@ URL_PATTERN = re.compile(r"https?://[^\s)\]]+")
 SHA256_PATTERN = re.compile(r"\b[a-fA-F0-9]{64}\b")
 MD5_PATTERN = re.compile(r"\b[a-fA-F0-9]{32}\b")
 ASN_PATTERN = re.compile(r"\bAS\d{1,10}\b", re.IGNORECASE)
+ATTACK_PATTERN = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.IGNORECASE)
+YARA_RULE_PATTERN = re.compile(r"(?is)\brule\s+[A-Za-z0-9_:-]+\s*\{.*?\}")
+SIGMA_BLOCK_SPLIT = re.compile(r"(?m)^\s*---\s*$")
+SNORT_RULE_PATTERN = re.compile(r"(?m)^\s*(alert|drop|reject|pass)\s+\S+\s+\S+\s+\S+\s*\(.*\)\s*$")
 
 _COUNTRY_ALIASES = {
     "u.s.": "United States",
@@ -405,6 +409,46 @@ def extract_iocs(text: str) -> dict[str, list[str]]:
         "sha256": sorted(set(SHA256_PATTERN.findall(text))),
         "md5": sorted(set(MD5_PATTERN.findall(text))),
     }
+
+
+def extract_attack_patterns(text: str) -> list[str]:
+    text_value = text or ""
+    matches = {match.upper() for match in ATTACK_PATTERN.findall(text_value)}
+    return sorted(matches)
+
+
+def extract_yara_rules(text: str, max_chars: int = 200000, max_rules: int = 10) -> list[str]:
+    value = (text or "")[:max_chars]
+    rules: list[str] = []
+    for match in YARA_RULE_PATTERN.finditer(value):
+        rule = match.group(0).strip()
+        if rule:
+            rules.append(rule)
+        if len(rules) >= max_rules:
+            break
+    return rules
+
+
+def extract_sigma_rules(text: str, max_chars: int = 200000, max_rules: int = 10) -> list[str]:
+    value = (text or "")[:max_chars]
+    blocks = SIGMA_BLOCK_SPLIT.split(value)
+    results: list[str] = []
+    for block in blocks:
+        block_text = block.strip()
+        if not block_text:
+            continue
+        lower = block_text.lower()
+        if "title:" in lower and "detection:" in lower:
+            results.append(block_text)
+        if len(results) >= max_rules:
+            break
+    return results
+
+
+def extract_snort_rules(text: str, max_chars: int = 200000, max_rules: int = 20) -> list[str]:
+    value = (text or "")[:max_chars]
+    rules = [match.group(0).strip() for match in SNORT_RULE_PATTERN.finditer(value)]
+    return rules[:max_rules]
 
 
 def empty_iocs() -> dict[str, list[str]]:

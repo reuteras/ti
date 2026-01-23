@@ -67,7 +67,13 @@ def _author_key(prefix: str, source_url: str, name: str) -> str:
 def fetch_documents(token: str, updated_after: str | None) -> list:
     reader = ReadwiseReader(token=token)
     updated_dt = isoparse(updated_after) if updated_after else None
-    return reader.get_documents(updated_after=updated_dt, withHtmlContent=True)
+    return list(
+        reader.iter_documents(
+            updated_after=updated_dt,
+            withHtmlContent=True,
+            retry_on_429=True,
+        )
+    )
 
 
 def _collect_tags(doc) -> set[str]:

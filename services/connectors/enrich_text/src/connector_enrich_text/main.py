@@ -7,7 +7,14 @@ from datetime import datetime, timedelta, timezone
 from dateutil.parser import isoparse
 from pycti import OpenCTIConnectorHelper
 
-from connectors_common.extractors import extract_cves, extract_iocs
+from connectors_common.extractors import (
+    extract_attack_patterns,
+    extract_cves,
+    extract_iocs,
+    extract_sigma_rules,
+    extract_snort_rules,
+    extract_yara_rules,
+)
 from connectors_common.llm import extract_entities
 from connectors_common.opencti_client import OpenCTIClient
 from connectors_common.state_store import StateStore
@@ -151,6 +158,10 @@ class EnrichTextConnector:
         cves = extract_cves(text)
         iocs = extract_iocs(text)
         entities = extract_entities(text)
+        attack_patterns = extract_attack_patterns(text)
+        yara_rules = extract_yara_rules(text)
+        sigma_rules = extract_sigma_rules(text)
+        snort_rules = extract_snort_rules(text)
         for cve in cves:
             seen_key = _seen_key(state_prefix, entity_id, f"cve:{cve}")
             if not self.state.remember_hash("enrich", seen_key):
@@ -223,6 +234,16 @@ class EnrichTextConnector:
             country_id = self.client.create_country(country)
             if country_id:
                 self.client.create_relationship(entity_id, country_id, "related-to")
+        for technique in attack_patterns:
+            seen_key = _seen_key(state_prefix, entity_id, f"attack:{technique}")
+            if not self.state.remember_hash("enrich", seen_key):
+                continue
+            attack_id = self.client.create_attack_pattern(technique)
+            if attack_id:
+                self.client.create_relationship(entity_id, attack_id, "related-to")
+        self._add_rule_notes(entity_id, state_prefix, "yara", yara_rules)
+        self._add_rule_notes(entity_id, state_prefix, "sigma", sigma_rules)
+        self._add_rule_notes(entity_id, state_prefix, "snort", snort_rules)
 
     def _should_enrich(self, labels: set[str]) -> bool:
         if "all" in self.allowed_sources:
@@ -231,6 +252,25 @@ class EnrichTextConnector:
             if label.startswith("source:") and label.split(":", 1)[1] in self.allowed_sources:
                 return True
         return False
+
+    def _add_rule_notes(self, entity_id: str, state_prefix: str, rule_type: str, rules: list[str]) -> None:
+        if not rules:
+            return
+        for idx, rule in enumerate(rules, start=1):
+            rule_text = rule.strip()
+            if not rule_text:
+                continue
+            digest = hashlib.sha256(rule_text.encode("utf-8")).hexdigest()
+            seen_key = _seen_key(state_prefix, entity_id, f"{rule_type}:{digest}")
+            if not self.state.remember_hash("enrich", seen_key):
+                continue
+            title = f"{rule_type.upper()} rule {idx}"
+            content = f"{title}\n\n{rule_text}"
+            self.client.create_note(
+                content,
+                object_refs=[entity_id],
+                labels=[f"rule:{rule_type}", "source:enrich-text"],
+            )
 
     def _run(self) -> None:
         last_run = self.state.get("last_run")
