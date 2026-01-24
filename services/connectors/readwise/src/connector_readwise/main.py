@@ -231,7 +231,9 @@ class ReadwiseConnector:
             url_digest = url_hash(source_url)
 
             text_input = (
-                getattr(doc, "content", None)
+                getattr(doc, "html_content", None)
+                or getattr(doc, "htmlContent", None)
+                or getattr(doc, "content", None)
                 or getattr(doc, "summary", None)
                 or getattr(doc, "notes", None)
                 or ""

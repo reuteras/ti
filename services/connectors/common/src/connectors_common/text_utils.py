@@ -88,7 +88,12 @@ def extract_main_text(value: str) -> str:
     if "<" not in value:
         return value.strip()
     extracted = trafilatura.extract(value, include_comments=False, include_tables=False)
-    return extracted or html_to_text(value)
+    if not extracted:
+        return html_to_text(value)
+    if extracted.count("\n") < 2:
+        # Fall back to HTML parsing when trafilatura flattens paragraph structure.
+        return html_to_text(value)
+    return extracted
 
 
 _MARKDOWN_SPECIALS = re.compile(r"([\\\\`*_{}\\[\\]()>#+\\-.!|])")
