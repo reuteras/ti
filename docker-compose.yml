@@ -40,6 +40,10 @@ services:
 
   rabbitmq:
     image: rabbitmq:4.2-management
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 131072
     environment:
       - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER}
       - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS}
@@ -67,7 +71,7 @@ services:
       retries: 5
 
   opencti:
-    image: opencti/platform:6.9.8
+    image: opencti/platform:latest
     env_file:
       - .env
     environment:
@@ -116,7 +120,7 @@ services:
       retries: 10
 
   opencti-worker:
-    image: opencti/worker:6.9.8
+    image: opencti/worker:latest
     env_file:
       - .env
     environment:
@@ -292,6 +296,12 @@ services:
       - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-900}
       - ENRICH_LOOKBACK_DAYS=${ENRICH_LOOKBACK_DAYS:-7}
       - TI_ENRICH_SOURCES=${TI_ENRICH_SOURCES:-miniflux,readwise,zotero}
+      - ENRICHMENT_LLM_ENABLED=${ENRICHMENT_LLM_ENABLED:-true}
+      - ENRICHMENT_LLM_ENDPOINT=${ENRICHMENT_LLM_ENDPOINT:-http://ollama:11434/api/generate}
+      - ENRICHMENT_LLM_MODEL=${ENRICHMENT_LLM_MODEL:-llama3.2:3b}
+      - ENRICHMENT_SUMMARY_ENABLED=${ENRICHMENT_SUMMARY_ENABLED:-false}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - enrich-text-state:/data
     depends_on:
@@ -302,6 +312,23 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    volumes:
+      - ollama-data:/root/.ollama
+    mem_limit: ${OLLAMA_MEM_LIMIT:-4g}
+    cpus: ${OLLAMA_CPUS:-2.0}
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "ollama serve & sleep 2; ollama pull ${ENRICHMENT_LLM_MODEL:-llama3.2:3b}; wait"
 
   connector-cvelist:
     build:
@@ -702,3 +729,4 @@ volumes:
   enrich-text-state:
   mapping-data:
   cvelist-state:
+  ollama-data:

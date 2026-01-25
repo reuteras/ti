@@ -12,7 +12,7 @@ def summarize_text(text: str) -> str | None:
     if not enabled:
         return None
     endpoint = os.getenv("ENRICHMENT_LLM_ENDPOINT", "http://host.docker.internal:11434/api/generate")
-    model = os.getenv("ENRICHMENT_LLM_MODEL", "llama3.1:8b")
+    model = os.getenv("ENRICHMENT_LLM_MODEL", "llama3.2:3b")
     prompt = textwrap.dedent(
         f"""
         Summarize the following in 2-3 bullet points.
@@ -47,7 +47,7 @@ def extract_entities(text: str, max_chars: int = 4000) -> dict[str, list[str]]:
     if len(value) > max_chars:
         value = value[:max_chars]
     endpoint = os.getenv("ENRICHMENT_LLM_ENDPOINT", "http://host.docker.internal:11434/api/generate")
-    model = os.getenv("ENRICHMENT_LLM_MODEL", "llama3.1:8b")
+    model = os.getenv("ENRICHMENT_LLM_MODEL", "llama3.2:3b")
     prompt = textwrap.dedent(
         f"""
         Extract named entities from the text. Return strict JSON only with arrays:

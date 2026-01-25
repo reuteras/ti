@@ -6,6 +6,7 @@ IPV4_PATTERN = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[
 DOMAIN_PATTERN = re.compile(r"\b([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b")
 URL_PATTERN = re.compile(r"https?://[^\s)\]]+")
 SHA256_PATTERN = re.compile(r"\b[a-fA-F0-9]{64}\b")
+SHA1_PATTERN = re.compile(r"\b[a-fA-F0-9]{40}\b")
 MD5_PATTERN = re.compile(r"\b[a-fA-F0-9]{32}\b")
 ASN_PATTERN = re.compile(r"\bAS\d{1,10}\b", re.IGNORECASE)
 ATTACK_PATTERN = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.IGNORECASE)
@@ -400,14 +401,16 @@ def empty_label_entities() -> dict[str, list[str]]:
 
 def extract_iocs(text: str) -> dict[str, list[str]]:
     text = text or ""
+    hash_source = URL_PATTERN.sub(" ", text)
     return {
         "urls": sorted(set(URL_PATTERN.findall(text))),
         "domains": sorted(set(DOMAIN_PATTERN.findall(text))),
         "ipv4": sorted(set(IPV4_PATTERN.findall(text))),
         "asns": extract_asns(text),
         "countries": extract_countries(text),
-        "sha256": sorted(set(SHA256_PATTERN.findall(text))),
-        "md5": sorted(set(MD5_PATTERN.findall(text))),
+        "sha256": sorted(set(SHA256_PATTERN.findall(hash_source))),
+        "sha1": sorted(set(SHA1_PATTERN.findall(hash_source))),
+        "md5": sorted(set(MD5_PATTERN.findall(hash_source))),
     }
 
 
@@ -459,5 +462,6 @@ def empty_iocs() -> dict[str, list[str]]:
         "asns": [],
         "countries": [],
         "sha256": [],
+        "sha1": [],
         "md5": [],
     }

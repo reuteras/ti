@@ -15,7 +15,7 @@ from connectors_common.extractors import (
     extract_snort_rules,
     extract_yara_rules,
 )
-from connectors_common.llm import extract_entities
+from connectors_common.llm import extract_entities, summarize_text
 from connectors_common.opencti_client import OpenCTIClient
 from connectors_common.state_store import StateStore
 from connectors_common.work import WorkTracker
@@ -155,6 +155,18 @@ class EnrichTextConnector:
     def _enrich_text(self, entity_id: str, text: str, state_prefix: str) -> None:
         if not text:
             return
+        summary_enabled = os.getenv("ENRICHMENT_SUMMARY_ENABLED", "false").lower() == "true"
+        if state_prefix == "report" and summary_enabled:
+            summary = summarize_text(text[:12000])
+            if summary:
+                digest = hashlib.sha256(summary.encode("utf-8")).hexdigest()
+                seen_key = _seen_key(state_prefix, entity_id, f"summary:{digest}")
+                if self.state.remember_hash("enrich", seen_key):
+                    self.client.create_note(
+                        f"Summary\n\n{summary}",
+                        object_refs=[entity_id],
+                        labels=["summary", "source:enrich-text"],
+                    )
         cves = extract_cves(text)
         iocs = extract_iocs(text)
         entities = extract_entities(text)
@@ -197,6 +209,27 @@ class EnrichTextConnector:
             obs_id = self.client.create_observable("Autonomous-System", asn)
             if obs_id:
                 self.client.create_relationship(entity_id, obs_id, "related-to")
+        for sha256 in iocs.get("sha256", []):
+            seen_key = _seen_key(state_prefix, entity_id, f"sha256:{sha256}")
+            if not self.state.remember_hash("enrich", seen_key):
+                continue
+            file_id = self.client.create_file_hash("SHA-256", sha256)
+            if file_id:
+                self.client.create_relationship(entity_id, file_id, "related-to")
+        for sha1 in iocs.get("sha1", []):
+            seen_key = _seen_key(state_prefix, entity_id, f"sha1:{sha1}")
+            if not self.state.remember_hash("enrich", seen_key):
+                continue
+            file_id = self.client.create_file_hash("SHA-1", sha1)
+            if file_id:
+                self.client.create_relationship(entity_id, file_id, "related-to")
+        for md5 in iocs.get("md5", []):
+            seen_key = _seen_key(state_prefix, entity_id, f"md5:{md5}")
+            if not self.state.remember_hash("enrich", seen_key):
+                continue
+            file_id = self.client.create_file_hash("MD5", md5)
+            if file_id:
+                self.client.create_relationship(entity_id, file_id, "related-to")
         for country in iocs["countries"]:
             seen_key = _seen_key(state_prefix, entity_id, f"country:{country}")
             if not self.state.remember_hash("enrich", seen_key):

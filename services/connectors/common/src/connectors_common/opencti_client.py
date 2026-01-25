@@ -145,6 +145,25 @@ class OpenCTIClient:
             reports.append(node)
         return reports
 
+    def get_report_description(self, report_id: str) -> str | None:
+        if not self.admin_token or not report_id:
+            return None
+        query = """
+        query Report($id: String!) {
+          report(id: $id) {
+            description
+          }
+        }
+        """
+        try:
+            data = self._post(query, {"id": report_id})
+        except Exception as exc:
+            logger.warning("opencti_report_fetch_failed error=%s", exc)
+            return None
+        report = data.get("report", {}) if isinstance(data, dict) else {}
+        description = report.get("description")
+        return description if isinstance(description, str) else None
+
     def list_notes_since(self, since: datetime) -> list[dict[str, Any]]:
         if not self.admin_token:
             return []
@@ -236,6 +255,63 @@ class OpenCTIClient:
                     self._external_refs_supported = False
                     return
                 continue
+
+    def update_report_description(self, report_id: str, description: str) -> bool:
+        if not self.admin_token or not report_id or not description:
+            return False
+        patch = [
+            {
+                "key": "description",
+                "operation": "replace",
+                "value": [escape_markdown(description.strip())],
+            }
+        ]
+        mutations = [
+            """
+            mutation ReportEdit($id: ID!, $input: [EditInput]!) {
+              reportEdit(id: $id) {
+                fieldPatch(input: $input) { id }
+              }
+            }
+            """,
+            """
+            mutation StixEdit($id: ID!, $input: [EditInput]!) {
+              stixDomainObjectEdit(id: $id) {
+                fieldPatch(input: $input) { id }
+              }
+            }
+            """,
+        ]
+        for mutation in mutations:
+            try:
+                self._post(mutation, {"id": report_id, "input": patch})
+                return True
+            except Exception:
+                continue
+        return False
+
+    def delete_note(self, note_id: str) -> bool:
+        if not self.admin_token or not note_id:
+            return False
+        mutations = [
+            """
+            mutation NoteDelete($id: ID!) {
+              noteDelete(id: $id)
+            }
+            """,
+            """
+            mutation StixDelete($id: ID!) {
+              stixDomainObjectDelete(id: $id)
+            }
+            """,
+        ]
+        for mutation in mutations:
+            try:
+                self._post(mutation, {"id": note_id})
+                return True
+            except Exception:
+                continue
+        return False
 
     def _create_external_reference(self, source_name: str, url: str, external_id: str | None) -> str | None:
         if not self.admin_token:
@@ -590,6 +666,38 @@ class OpenCTIClient:
             return None
         return data.get("stixCyberObservableAdd", {}).get("id")
 
+    def create_file_hash(self, algorithm: str, hash_value: str) -> str | None:
+        if not self.admin_token:
+            return None
+        if not self._observables_supported:
+            return None
+        normalized_hash = (hash_value or "").strip()
+        if not normalized_hash:
+            return None
+        algo = algorithm.strip().upper().replace("SHA1", "SHA-1").replace("SHA256", "SHA-256")
+        expected_lengths = {"MD5": 32, "SHA-1": 40, "SHA-256": 64}
+        expected_len = expected_lengths.get(algo)
+        if not expected_len or len(normalized_hash) != expected_len:
+            logger.warning("opencti_file_hash_skipped algorithm=%s hash=%s", algo, normalized_hash)
+            return None
+        input_payload: dict[str, Any] = {"hashes": [{"algorithm": algo, "hash": normalized_hash}]}
+        mutation = """
+        mutation ObservableAdd($type: String!, $StixFile: StixFileAddInput) {
+          stixCyberObservableAdd(type: $type, StixFile: $StixFile) { id }
+        }
+        """
+        try:
+            data = self._post(mutation, {"type": "StixFile", "StixFile": input_payload})
+        except Exception as exc:
+            message = str(exc)
+            if "Unknown argument" in message or "Cannot query field" in message or "GRAPHQL_VALIDATION_FAILED" in message:
+                self._observables_supported = False
+                logger.warning("opencti_observable_add_disabled")
+                return None
+            logger.warning("opencti_file_hash_add_failed error=%s", exc)
+            return None
+        return data.get("stixCyberObservableAdd", {}).get("id")
+
     def create_artifact(
         self,
         sha256: str,
@@ -664,7 +772,7 @@ class OpenCTIClient:
         """
         payload: dict[str, Any] = {"content": escape_markdown(content.strip())}
         if object_refs:
-            payload["objectRefs"] = object_refs
+            payload["objects"] = object_refs
         if created_by_id:
             payload["createdBy"] = created_by_id
         if confidence is not None:

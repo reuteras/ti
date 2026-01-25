@@ -134,6 +134,25 @@ class MappingStore:
                 (source, external_id, opencti_id, obj_type, self._now()),
             )
 
+    def list_external_ids_by_source(self, source: str) -> list[tuple[str, str, str]]:
+        if not source:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT external_id, opencti_id, type FROM external_id_map WHERE source = ?",
+                (source,),
+            ).fetchall()
+        return [(row[0], row[1], row[2]) for row in rows]
+
+    def delete_external_id(self, source: str, external_id: str) -> None:
+        if not source or not external_id:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM external_id_map WHERE source = ? AND external_id = ?",
+                (source, external_id),
+            )
+
     def get_by_doi(self, doi: str) -> str | None:
         if not doi:
             return None

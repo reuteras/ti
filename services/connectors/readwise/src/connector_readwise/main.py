@@ -230,16 +230,19 @@ class ReadwiseConnector:
             source_url = canonicalize_url(raw_url)
             url_digest = url_hash(source_url)
 
-            text_input = (
+            full_text_input = (
                 getattr(doc, "html_content", None)
                 or getattr(doc, "htmlContent", None)
                 or getattr(doc, "content", None)
-                or getattr(doc, "summary", None)
-                or getattr(doc, "notes", None)
                 or ""
             )
+            text_input = full_text_input or getattr(doc, "summary", None) or getattr(doc, "notes", None) or ""
+            summary_text = getattr(doc, "summary", None) or ""
             text = extract_main_text(text_input)
             text = format_readable_text(text)
+            full_text = ""
+            if full_text_input:
+                full_text = format_readable_text(extract_main_text(full_text_input))
             content_fp = content_fingerprint(text)
             labels = ["source:readwise"] + source_labels("readwise")
             author_name = (getattr(doc, "author", None) or "").strip()
@@ -286,6 +289,7 @@ class ReadwiseConnector:
                 if duplicate:
                     report_id = duplicate.report_id
                     match_reason = "title_similarity"
+            created_new = False
             if not report_id:
                 report = ReportInput(
                     title=title,
@@ -300,6 +304,7 @@ class ReadwiseConnector:
                     external_id=url_digest or None,
                 )
                 report_id = self.client.create_report(report)
+                created_new = report_id is not None
             if report_id:
                 logger.info(
                     "report_upserted source=readwise id=%s title=%s match=%s",
@@ -324,6 +329,36 @@ class ReadwiseConnector:
                     )
                 for author_id in author_ids:
                     self.client.create_relationship(report_id, author_id, "related-to")
+                if full_text:
+                    existing_description = None
+                    if not created_new:
+                        existing_description = self.client.get_report_description(report_id)
+                    if created_new:
+                        existing_description = text
+                    if existing_description is None:
+                        existing_description = ""
+                    existing_value = existing_description.strip()
+                    full_value = full_text.strip()
+                    if full_value and full_value != existing_value and len(full_value) > len(existing_value) + 200:
+                        self.client.update_report_description(report_id, full_value)
+                if summary_text and doc_id is not None:
+                    summary_value = format_readable_text(extract_main_text(summary_text))
+                    if summary_value:
+                        external_id = f"{doc_id}:summary"
+                        existing_note = self.mapping.get_by_external_id("readwise_summary", external_id)
+                        if not existing_note:
+                            note_id = self.client.create_note(
+                                f"Readwise summary\n\n{summary_value}",
+                                object_refs=[report_id],
+                                labels=["summary", "source:readwise"],
+                            )
+                            if note_id:
+                                self.mapping.upsert_external_id(
+                                    "readwise_summary",
+                                    external_id,
+                                    note_id,
+                                    "Note",
+                                )
                 highlights = getattr(doc, "highlights", None) or []
                 self._handle_extracted_links(report_id, text_input, highlights)
                 for highlight in highlights:

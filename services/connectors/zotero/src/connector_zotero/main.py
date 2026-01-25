@@ -425,21 +425,6 @@ class ZoteroConnector:
             logger.info("report_skipped source=zotero reason=create_failed title=%s", title)
         return report_id
 
-    def _build_note_chunks(self, title: str, metadata: str, content: str) -> list[tuple[str, str]]:
-        if not content:
-            return []
-        prefix = f"{metadata}\n\n"
-        max_chars = max(1000, self.note_max_chars)
-        chunks: list[str] = []
-        for start in range(0, len(content), max_chars):
-            chunks.append(content[start : start + max_chars])
-        total = len(chunks)
-        results = []
-        for idx, chunk in enumerate(chunks, start=1):
-            suffix = f" (part {idx}/{total})" if total > 1 else ""
-            results.append((f"{title}{suffix}", f"{prefix}{chunk}"))
-        return results
-
     def _run(self) -> None:
         if not self.api_key or not self.library_id:
             logger.warning("zotero_not_configured")
@@ -539,6 +524,7 @@ class ZoteroConnector:
     ) -> None:
         if not self.zotero:
             return
+        self._cleanup_fulltext_notes()
         pending = self.state.get("zotero_fulltext_pending", [])
         if not isinstance(pending, list):
             pending = []
@@ -604,6 +590,10 @@ class ZoteroConnector:
                 continue
 
             attachment_title = data.get("title") or data.get("filename") or f"Attachment {attachment_key}"
+            content_body = normalized[: self.note_max_chars]
+            updated = self.client.update_report_description(report_id, content_body)
+            if not updated:
+                logger.warning("zotero_fulltext_description_update_failed report_id=%s", report_id)
             artifact_id = self.client.create_artifact(
                 content_hash,
                 name=attachment_title,
@@ -614,41 +604,25 @@ class ZoteroConnector:
             if artifact_id:
                 self.client.create_relationship(report_id, artifact_id, "related-to")
 
-            doi = normalize_doi((data.get("DOI") or data.get("doi") or ""))
-            source_url = canonicalize_url(data.get("url") or "")
-            metadata = "\n".join(
-                [
-                    f"zotero_attachment_key: {attachment_key}",
-                    f"zotero_parent_key: {parent_key}",
-                    f"doi: {doi}" if doi else "doi:",
-                    f"url: {source_url}" if source_url else "url:",
-                    f"indexed_pages: {fulltext_payload.get('indexedPages')}",
-                    f"total_pages: {fulltext_payload.get('totalPages')}",
-                    f"retrieved_at: {datetime.now(timezone.utc).isoformat()}",
-                    f"content_sha256: {content_hash}",
-                ]
-            )
-            note_title = f"Zotero fulltext: {attachment_title}"
-            chunks = self._build_note_chunks(note_title, metadata, normalized)
-            for title, note_content in chunks:
-                note_id = self.client.create_note(
-                    f"{title}\n{note_content}",
-                    object_refs=[ref for ref in [report_id, artifact_id] if ref],
-                    labels=["source:zotero"],
-                )
-                if note_id:
-                    self.mapping.upsert_external_id(
-                        "zotero_fulltext",
-                        f"{attachment_key}:{content_hash}:{title}",
-                        note_id,
-                        "Note",
-                    )
         if remaining_pending:
             self.state.set("zotero_fulltext_pending", remaining_pending)
         else:
             self.state.set("zotero_fulltext_pending", [])
         if last_version and last_version != since_fulltext_version:
             self.state.set("last_fulltext_version", last_version)
+
+    def _cleanup_fulltext_notes(self) -> None:
+        entries = self.mapping.list_external_ids_by_source("zotero_fulltext")
+        if not entries:
+            return
+        deleted = 0
+        for external_id, note_id, obj_type in entries:
+            if obj_type != "Note":
+                continue
+            if self.client.delete_note(note_id):
+                deleted += 1
+            self.mapping.delete_external_id("zotero_fulltext", external_id)
+        logger.info("zotero_fulltext_notes_deleted count=%s", deleted)
 
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):
