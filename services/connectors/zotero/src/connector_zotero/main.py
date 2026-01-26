@@ -159,7 +159,7 @@ def normalize_fulltext(text: str) -> str:
 def fetch_approved_tags(briefing_url: str) -> set[str]:
     url = f"{briefing_url.rstrip('/')}/zotero/tags/approved.json"
     payload = None
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             with httpx.Client(timeout=10) as client:
                 response = client.get(url)
@@ -167,9 +167,8 @@ def fetch_approved_tags(briefing_url: str) -> set[str]:
                 payload = response.json()
                 break
         except Exception as exc:
-            if attempt == 2:
-                logger.warning("zotero_tag_filter_unavailable error=%s", exc)
-            time.sleep(2)
+            logger.warning("zotero_tag_filter_unavailable attempt=%s error=%s", attempt + 1, exc)
+            time.sleep(2**attempt)
     if payload is None:
         return set()
     try:
@@ -181,7 +180,7 @@ def fetch_approved_tags(briefing_url: str) -> set[str]:
 def fetch_approved_collections(briefing_url: str) -> set[str]:
     url = f"{briefing_url.rstrip('/')}/zotero/collections/approved.json"
     payload = None
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             with httpx.Client(timeout=10) as client:
                 response = client.get(url)
@@ -189,9 +188,8 @@ def fetch_approved_collections(briefing_url: str) -> set[str]:
                 payload = response.json()
                 break
         except Exception as exc:
-            if attempt == 2:
-                logger.warning("zotero_collection_filter_unavailable error=%s", exc)
-            time.sleep(2)
+            logger.warning("zotero_collection_filter_unavailable attempt=%s error=%s", attempt + 1, exc)
+            time.sleep(2**attempt)
     if payload is None:
         return set()
     try:
@@ -426,94 +424,98 @@ class ZoteroConnector:
         return report_id
 
     def _run(self) -> None:
-        if not self.api_key or not self.library_id:
-            logger.warning("zotero_not_configured")
-            return
-        work = WorkTracker(self.helper, "Zotero import")
-        since_version = self.state.get("last_version")
-        since_fulltext_version = self.state.get("last_fulltext_version")
-        cutoff_dt = None
-        if not since_version and self.zotero_lookback_days > 0:
-            cutoff_dt = datetime.now(timezone.utc) - timedelta(days=self.zotero_lookback_days)
-        approved_tags = fetch_approved_tags(self.briefing_url)
-        approved_collections = fetch_approved_collections(self.briefing_url)
-        if not approved_tags and not approved_collections:
-            logger.info("zotero_no_approved_filters")
-            work.done("No approved filters")
-            return
-        recent_reports = self.client.list_reports_since(datetime.now(timezone.utc) - timedelta(days=self.dedup_days))
-        candidates = prepare_candidates(recent_reports)
-        if not self.zotero:
-            logger.warning("zotero_not_configured")
-            work.done("Zotero not configured")
-            return
-        items, last_version, item_pages = fetch_items(self.zotero, since_version)
-        total_items = len(items)
-        work.log(f"items={total_items} pages={item_pages}")
-        annotations = []
-        last_progress = -1
-        for idx, item in enumerate(items, start=1):
-            if total_items:
-                percent = int((idx / total_items) * 100)
-                if percent >= last_progress + 5:
-                    work.progress(percent, f"processed_items={idx}/{total_items}")
-                    last_progress = percent
-            data = item.get("data", {})
-            if data.get("itemType") == "annotation":
-                annotations.append(item)
-                continue
-            item_key = item.get("key") or data.get("key")
-            self._upsert_report(data, item_key, candidates, approved_tags, approved_collections, cutoff_dt)
-        for item in annotations:
-            data = item.get("data", {})
-            parent_key = data.get("parentItem")
-            if not parent_key:
-                continue
-            report_id = self.mapping.get_by_external_id("zotero_item", str(parent_key))
-            if not report_id:
-                continue
-            annotation_text = (data.get("annotationText") or "").strip()
-            annotation_comment = (data.get("annotationComment") or "").strip()
-            page_label = data.get("annotationPageLabel")
-            annotation_key = item.get("key") or data.get("key")
-            if annotation_key:
-                external_id = f"{parent_key}:{annotation_key}"
-            else:
-                fingerprint = f"{parent_key}:{page_label or ''}:{annotation_text.lower()[:200]}"
-                external_id = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
-            existing_note = self.mapping.get_by_external_id("zotero_annot", external_id)
-            if existing_note:
-                continue
-            lines = []
-            if annotation_text:
-                lines.append(annotation_text)
-            if annotation_comment:
-                lines.append(f"Note: {annotation_comment}")
-            if page_label:
-                lines.append(f"Page: {page_label}")
-            if parent_key:
-                lines.append(f"Source: zotero:{parent_key}")
-            content = "\n".join(lines)
-            if not content:
-                continue
-            note_id = self.client.create_note(
-                content,
-                object_refs=[report_id],
-                labels=["source:zotero"],
+        try:
+            if not self.api_key or not self.library_id:
+                logger.warning("zotero_not_configured")
+                return
+            work = WorkTracker(self.helper, "Zotero import")
+            since_version = self.state.get("last_version")
+            since_fulltext_version = self.state.get("last_fulltext_version")
+            cutoff_dt = None
+            if not since_version and self.zotero_lookback_days > 0:
+                cutoff_dt = datetime.now(timezone.utc) - timedelta(days=self.zotero_lookback_days)
+            approved_tags = fetch_approved_tags(self.briefing_url)
+            approved_collections = fetch_approved_collections(self.briefing_url)
+            if not approved_tags and not approved_collections:
+                logger.warning("zotero_no_approved_filters")
+                work.done("No approved filters")
+                return
+            recent_reports = self.client.list_reports_since(datetime.now(timezone.utc) - timedelta(days=self.dedup_days))
+            candidates = prepare_candidates(recent_reports)
+            if not self.zotero:
+                logger.warning("zotero_not_configured")
+                work.done("Zotero not configured")
+                return
+            items, last_version, item_pages = fetch_items(self.zotero, since_version)
+            total_items = len(items)
+            work.log(f"items={total_items} pages={item_pages}")
+            annotations = []
+            last_progress = -1
+            for idx, item in enumerate(items, start=1):
+                if total_items:
+                    percent = int((idx / total_items) * 100)
+                    if percent >= last_progress + 5:
+                        work.progress(percent, f"processed_items={idx}/{total_items}")
+                        last_progress = percent
+                data = item.get("data", {})
+                if data.get("itemType") == "annotation":
+                    annotations.append(item)
+                    continue
+                item_key = item.get("key") or data.get("key")
+                self._upsert_report(data, item_key, candidates, approved_tags, approved_collections, cutoff_dt)
+            for item in annotations:
+                data = item.get("data", {})
+                parent_key = data.get("parentItem")
+                if not parent_key:
+                    continue
+                report_id = self.mapping.get_by_external_id("zotero_item", str(parent_key))
+                if not report_id:
+                    continue
+                annotation_text = (data.get("annotationText") or "").strip()
+                annotation_comment = (data.get("annotationComment") or "").strip()
+                page_label = data.get("annotationPageLabel")
+                annotation_key = item.get("key") or data.get("key")
+                if annotation_key:
+                    external_id = f"{parent_key}:{annotation_key}"
+                else:
+                    fingerprint = f"{parent_key}:{page_label or ''}:{annotation_text.lower()[:200]}"
+                    external_id = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+                existing_note = self.mapping.get_by_external_id("zotero_annot", external_id)
+                if existing_note:
+                    continue
+                lines = []
+                if annotation_text:
+                    lines.append(annotation_text)
+                if annotation_comment:
+                    lines.append(f"Note: {annotation_comment}")
+                if page_label:
+                    lines.append(f"Page: {page_label}")
+                if parent_key:
+                    lines.append(f"Source: zotero:{parent_key}")
+                content = "\n".join(lines)
+                if not content:
+                    continue
+                note_id = self.client.create_note(
+                    content,
+                    object_refs=[report_id],
+                    labels=["source:zotero"],
+                )
+                if note_id and external_id:
+                    self.mapping.upsert_external_id("zotero_annot", external_id, note_id, "Note")
+                self._handle_extracted_links(report_id, annotation_text, annotation_comment)
+            self._process_fulltext(
+                approved_tags,
+                approved_collections,
+                candidates,
+                since_fulltext_version,
             )
-            if note_id and external_id:
-                self.mapping.upsert_external_id("zotero_annot", external_id, note_id, "Note")
-            self._handle_extracted_links(report_id, annotation_text, annotation_comment)
-        self._process_fulltext(
-            approved_tags,
-            approved_collections,
-            candidates,
-            since_fulltext_version,
-        )
-        if last_version and last_version != since_version:
-            self.state.set("last_version", last_version)
-        logger.info("zotero_run_completed items=%s", len(items))
-        work.done(f"items={len(items)}")
+            if last_version and last_version != since_version:
+                self.state.set("last_version", last_version)
+            logger.info("zotero_run_completed items=%s", len(items))
+            work.done(f"items={len(items)}")
+        except Exception as exc:
+            logger.exception("zotero_run_failed error=%s", exc)
+            return
 
     def _process_fulltext(
         self,

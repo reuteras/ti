@@ -620,7 +620,7 @@ class OpenCTIClient:
         if normalized_type in {"Domain-Name", "DomainName"}:
             normalized_value = normalized_value.rstrip(".")
             if not re.match(r"(?i)^(?:[a-z0-9-]+\.)+[a-z]{2,}$", normalized_value):
-                logger.warning("opencti_observable_add_skipped type=%s value=%s", normalized_type, normalized_value)
+                logger.debug("opencti_observable_add_skipped type=%s value=%s", normalized_type, normalized_value)
                 return None
 
         field_map = {
@@ -634,7 +634,7 @@ class OpenCTIClient:
         }
         field = field_map.get(normalized_type)
         if not field:
-            logger.warning("opencti_observable_add_skipped type=%s", normalized_type)
+            logger.debug("opencti_observable_add_skipped type=%s", normalized_type)
             return None
 
         input_payload: dict[str, Any] = {"value": normalized_value}
@@ -643,7 +643,7 @@ class OpenCTIClient:
             try:
                 input_payload = {"number": int(raw)}
             except ValueError:
-                logger.warning("opencti_observable_add_skipped type=%s value=%s", normalized_type, normalized_value)
+                logger.debug("opencti_observable_add_skipped type=%s value=%s", normalized_type, normalized_value)
                 return None
 
         mutation = f"""
@@ -678,7 +678,7 @@ class OpenCTIClient:
         expected_lengths = {"MD5": 32, "SHA-1": 40, "SHA-256": 64}
         expected_len = expected_lengths.get(algo)
         if not expected_len or len(normalized_hash) != expected_len:
-            logger.warning("opencti_file_hash_skipped algorithm=%s hash=%s", algo, normalized_hash)
+            logger.debug("opencti_file_hash_skipped algorithm=%s hash=%s", algo, normalized_hash)
             return None
         input_payload: dict[str, Any] = {"hashes": [{"algorithm": algo, "hash": normalized_hash}]}
         mutation = """

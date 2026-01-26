@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from dateutil.parser import isoparse
 from pycti import OpenCTIConnectorHelper
-from readwise.api import ReadwiseReader
+from typing import Any
 
 from connectors_common.dedup import find_best_match, prepare_candidates
 from connectors_common.fingerprint import content_fingerprint
@@ -64,21 +64,36 @@ def _author_key(prefix: str, source_url: str, name: str) -> str:
     return ""
 
 
-def fetch_documents(token: str, updated_after: str | None) -> list:
-    reader = ReadwiseReader(token=token)
-    updated_dt = isoparse(updated_after) if updated_after else None
-    return list(
-        reader.iter_documents(
-            updated_after=updated_dt,
-            withHtmlContent=True,
-            retry_on_429=True,
-        )
-    )
+def fetch_documents(token: str, updated_after: str | None) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {"withHtmlContent": True}
+    if updated_after:
+        params["updatedAfter"] = updated_after
+    documents: list[dict[str, Any]] = []
+    next_cursor: str | None = None
+    headers = {"Authorization": f"Token {token}"}
+    with httpx.Client(timeout=30) as client:
+        while True:
+            if next_cursor:
+                params["pageCursor"] = next_cursor
+            response = client.get("https://readwise.io/api/v3/list/", params=params, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+            documents.extend(payload.get("results", []))
+            next_cursor = payload.get("nextPageCursor")
+            if not next_cursor:
+                break
+    return documents
 
 
-def _collect_tags(doc) -> set[str]:
+def _doc_value(doc: Any, key: str, default: Any = None) -> Any:
+    if isinstance(doc, dict):
+        return doc.get(key, default)
+    return getattr(doc, key, default)
+
+
+def _collect_tags(doc: Any) -> set[str]:
     tags: set[str] = set()
-    doc_tags = getattr(doc, "tags", None)
+    doc_tags = _doc_value(doc, "tags")
     if isinstance(doc_tags, dict):
         for key, tag in doc_tags.items():
             name = getattr(tag, "name", None) or key
@@ -91,13 +106,13 @@ def _collect_tags(doc) -> set[str]:
     return tags
 
 
-def _published_from_doc(doc) -> str | None:
-    published = getattr(doc, "published_date", None)
+def _published_from_doc(doc: Any) -> str | None:
+    published = _doc_value(doc, "published_date")
     if isinstance(published, (int, float)):
         return datetime.fromtimestamp(published, tz=timezone.utc).isoformat()
     if isinstance(published, str) and published.strip():
         return published.strip()
-    updated_at = getattr(doc, "updated_at", None)
+    updated_at = _doc_value(doc, "updated_at")
     return updated_at if isinstance(updated_at, str) else None
 
 
@@ -205,8 +220,9 @@ class ReadwiseConnector:
         tag_cache: dict[str, set[str]] = {}
         for doc in documents:
             doc_tags = _collect_tags(doc)
-            if doc_tags and getattr(doc, "id", None):
-                tag_cache[doc.id] = doc_tags
+            doc_id = _doc_value(doc, "id")
+            if doc_tags and doc_id:
+                tag_cache[str(doc_id)] = doc_tags
         last_progress = -1
         for idx, doc in enumerate(documents, start=1):
             if total_documents:
@@ -214,30 +230,33 @@ class ReadwiseConnector:
                 if percent >= last_progress + 5:
                     work.progress(percent, f"processed_documents={idx}/{total_documents}")
                     last_progress = percent
-            updated_at = getattr(doc, "updated_at", None)
+            updated_at = _doc_value(doc, "updated_at")
             updated_iso = isoparse(updated_at).isoformat() if updated_at else None
             doc_tags = _collect_tags(doc)
-            if not doc_tags and getattr(doc, "parent_id", None):
-                doc_tags = tag_cache.get(doc.parent_id, set())
+            parent_id = _doc_value(doc, "parent_id")
+            if not doc_tags and parent_id:
+                doc_tags = tag_cache.get(str(parent_id), set())
             if not doc_tags.intersection(approved_tags):
                 logger.info(
                     "report_skipped source=readwise reason=tag_not_approved title=%s",
-                    getattr(doc, "title", None) or "Readwise document",
+                    _doc_value(doc, "title") or "Readwise document",
                 )
                 continue
 
-            raw_url = getattr(doc, "source_url", None) or getattr(doc, "url", None) or ""
+            raw_url = _doc_value(doc, "source_url") or _doc_value(doc, "url") or ""
             source_url = canonicalize_url(raw_url)
             url_digest = url_hash(source_url)
 
+            category = (_doc_value(doc, "category") or "").lower()
+            doc_id = _doc_value(doc, "id")
             full_text_input = (
-                getattr(doc, "html_content", None)
-                or getattr(doc, "htmlContent", None)
-                or getattr(doc, "content", None)
+                _doc_value(doc, "html_content")
+                or _doc_value(doc, "htmlContent")
+                or _doc_value(doc, "content")
                 or ""
             )
-            text_input = full_text_input or getattr(doc, "summary", None) or getattr(doc, "notes", None) or ""
-            summary_text = getattr(doc, "summary", None) or ""
+            text_input = full_text_input or _doc_value(doc, "summary") or _doc_value(doc, "notes") or ""
+            summary_text = _doc_value(doc, "summary") or ""
             text = extract_main_text(text_input)
             text = format_readable_text(text)
             full_text = ""
@@ -245,7 +264,7 @@ class ReadwiseConnector:
                 full_text = format_readable_text(extract_main_text(full_text_input))
             content_fp = content_fingerprint(text)
             labels = ["source:readwise"] + source_labels("readwise")
-            author_name = (getattr(doc, "author", None) or "").strip()
+            author_name = (_doc_value(doc, "author") or "").strip()
             author_ids: list[str] = []
             authors = _split_authors(author_name)
             author_id = None
@@ -262,12 +281,49 @@ class ReadwiseConnector:
                     if extra_id:
                         author_ids.append(extra_id)
 
-            title = getattr(doc, "title", None) or "Readwise document"
+            title = _doc_value(doc, "title") or "Readwise document"
             published = _published_from_doc(doc)
             external_ids: list[tuple[str, str]] = []
-            doc_id = getattr(doc, "id", None)
             if doc_id is not None:
                 external_ids.append(("readwise_doc", str(doc_id)))
+
+            if category in {"highlight", "note"} and parent_id:
+                parent_report_id = self.mapping.get_by_external_id("readwise_doc", str(parent_id))
+                if not parent_report_id:
+                    logger.warning(
+                        "readwise_parent_missing category=%s parent_id=%s title=%s",
+                        category,
+                        parent_id,
+                        title,
+                    )
+                    continue
+                if doc_id is not None:
+                    existing_note = self.mapping.get_by_external_id("readwise_doc_note", str(doc_id))
+                    if existing_note:
+                        continue
+                note_lines = []
+                if title and title != "Readwise document":
+                    note_lines.append(title)
+                if text:
+                    note_lines.append(text)
+                if source_url:
+                    note_lines.append(f"Source: {source_url}")
+                note_content = "\n\n".join(line for line in note_lines if line)
+                if not note_content:
+                    continue
+                note_id = self.client.create_note(
+                    note_content,
+                    object_refs=[parent_report_id],
+                    labels=["source:readwise", f"readwise:{category}"],
+                )
+                if note_id and doc_id is not None:
+                    self.mapping.upsert_external_id(
+                        "readwise_doc_note",
+                        str(doc_id),
+                        note_id,
+                        "Note",
+                    )
+                continue
             url_candidates = [source_url] if source_url else []
             confidence = source_confidence("readwise")
             if confidence is None:
@@ -362,17 +418,17 @@ class ReadwiseConnector:
                 highlights = getattr(doc, "highlights", None) or []
                 self._handle_extracted_links(report_id, text_input, highlights)
                 for highlight in highlights:
-                    highlight_id = getattr(highlight, "id", None)
+                    highlight_id = _doc_value(highlight, "id")
                     if highlight_id is None:
                         continue
                     external_id = str(highlight_id)
                     existing_note = self.mapping.get_by_external_id("readwise_highlight", external_id)
                     if existing_note:
                         continue
-                    excerpt = getattr(highlight, "text", None) or ""
-                    note_text = (getattr(highlight, "note", None) or "").strip()
-                    location = getattr(highlight, "location", None)
-                    location_type = getattr(highlight, "location_type", None)
+                    excerpt = _doc_value(highlight, "text") or ""
+                    note_text = (_doc_value(highlight, "note") or "").strip()
+                    location = _doc_value(highlight, "location")
+                    location_type = _doc_value(highlight, "location_type")
                     lines = []
                     if excerpt:
                         lines.append(excerpt.strip())
@@ -424,8 +480,8 @@ class ReadwiseConnector:
         urls = set()
         urls.update(_extract_urls(text_input or ""))
         for highlight in highlights or []:
-            urls.update(_extract_urls(getattr(highlight, "text", None) or ""))
-            urls.update(_extract_urls(getattr(highlight, "note", None) or ""))
+            urls.update(_extract_urls(_doc_value(highlight, "text") or ""))
+            urls.update(_extract_urls(_doc_value(highlight, "note") or ""))
         if not urls:
             return
         linked_ids: set[str] = set()
