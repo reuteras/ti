@@ -1,12 +1,6 @@
 version: 2
 updates:
   - package-ecosystem: "docker"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    cooldown:
-      default-days: 7
-  - package-ecosystem: "docker"
     directory: "/services/briefing"
     schedule:
       interval: "weekly"
@@ -14,12 +8,6 @@ updates:
       default-days: 7
   - package-ecosystem: "docker"
     directory: "/services/connectors/awesome_annual_security_reports"
-    schedule:
-      interval: "weekly"
-    cooldown:
-      default-days: 7
-  - package-ecosystem: "docker"
-    directory: "/services/connectors/common"
     schedule:
       interval: "weekly"
     cooldown:
