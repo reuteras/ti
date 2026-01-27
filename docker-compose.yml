@@ -5,7 +5,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - ES_JAVA_OPTS=-Xms6g -Xmx6g
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
     healthcheck:
@@ -436,13 +436,13 @@ services:
       - CONNECTOR_NAME=AlienVault
       - CONNECTOR_SCOPE=alienvault
       - CONNECTOR_LOG_LEVEL=warning
-      - CONNECTOR_DURATION_PERIOD=PT30M
+      - CONNECTOR_DURATION_PERIOD=PT10M
       - ALIENVAULT_BASE_URL=${ALIENVAULT_BASE_URL:-https://otx.alienvault.com}
       - ALIENVAULT_API_KEY=${ALIENVAULT_API_KEY}
       - ALIENVAULT_TLP=White
       - ALIENVAULT_CREATE_OBSERVABLES=true
       - ALIENVAULT_CREATE_INDICATORS=true
-      - ALIENVAULT_PULSE_START_TIMESTAMP=2020-05-01T00:00:00
+      - ALIENVAULT_PULSE_START_TIMESTAMP=${ALIENVAULT_PULSE_START_TIMESTAMP:-2025-01-01T00:00:00}
       - ALIENVAULT_REPORT_TYPE=threat-report
       - ALIENVAULT_REPORT_STATUS=New
       - ALIENVAULT_GUESS_MALWARE=false
@@ -599,6 +599,146 @@ services:
       - CONNECTOR_DURATION_PERIOD=PT1H
       - MISP_FEED_SOURCE_TYPE=url
       - MISP_FEED_URL=${MISP_FEED_URL}
+      - MISP_FEED_SSL_VERIFY=true
+      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
+      - MISP_FEED_CREATE_REPORTS=true
+      - MISP_FEED_REPORT_TYPE=misp-event
+      - MISP_FEED_CREATE_INDICATORS=true
+      - MISP_FEED_CREATE_OBSERVABLES=true
+      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
+      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-misp-feed-digitalside:
+    image: opencti/connector-misp-feed:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${MISP_FEED_DIGITALSIDE_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=MISP Feed DigitalSide
+      - CONNECTOR_SCOPE=misp-feed
+      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_DURATION_PERIOD=PT1H
+      - MISP_FEED_SOURCE_TYPE=url
+      - MISP_FEED_URL=${MISP_FEED_DIGITALSIDE_URL}
+      - MISP_FEED_SSL_VERIFY=true
+      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
+      - MISP_FEED_CREATE_REPORTS=true
+      - MISP_FEED_REPORT_TYPE=misp-event
+      - MISP_FEED_CREATE_INDICATORS=true
+      - MISP_FEED_CREATE_OBSERVABLES=true
+      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
+      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-misp-feed-abusech-bazaar:
+    image: opencti/connector-misp-feed:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${MISP_FEED_ABUSECH_BAZAAR_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=MISP Feed Abuse.ch Bazaar
+      - CONNECTOR_SCOPE=misp-feed
+      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_DURATION_PERIOD=PT1H
+      - MISP_FEED_SOURCE_TYPE=url
+      - MISP_FEED_URL=${MISP_FEED_ABUSECH_BAZAAR_URL}
+      - MISP_FEED_SSL_VERIFY=true
+      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
+      - MISP_FEED_CREATE_REPORTS=true
+      - MISP_FEED_REPORT_TYPE=misp-event
+      - MISP_FEED_CREATE_INDICATORS=true
+      - MISP_FEED_CREATE_OBSERVABLES=true
+      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
+      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-misp-feed-abusech-threatfox:
+    image: opencti/connector-misp-feed:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${MISP_FEED_ABUSECH_THREATFOX_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=MISP Feed Abuse.ch ThreatFox
+      - CONNECTOR_SCOPE=misp-feed
+      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_DURATION_PERIOD=PT1H
+      - MISP_FEED_SOURCE_TYPE=url
+      - MISP_FEED_URL=${MISP_FEED_ABUSECH_THREATFOX_URL}
+      - MISP_FEED_SSL_VERIFY=true
+      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
+      - MISP_FEED_CREATE_REPORTS=true
+      - MISP_FEED_REPORT_TYPE=misp-event
+      - MISP_FEED_CREATE_INDICATORS=true
+      - MISP_FEED_CREATE_OBSERVABLES=true
+      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
+      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-misp-feed-abusech-urlhaus:
+    image: opencti/connector-misp-feed:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${MISP_FEED_ABUSECH_URLHAUS_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=MISP Feed Abuse.ch URLhaus
+      - CONNECTOR_SCOPE=misp-feed
+      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_DURATION_PERIOD=PT1H
+      - MISP_FEED_SOURCE_TYPE=url
+      - MISP_FEED_URL=${MISP_FEED_ABUSECH_URLHAUS_URL}
+      - MISP_FEED_SSL_VERIFY=true
+      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
+      - MISP_FEED_CREATE_REPORTS=true
+      - MISP_FEED_REPORT_TYPE=misp-event
+      - MISP_FEED_CREATE_INDICATORS=true
+      - MISP_FEED_CREATE_OBSERVABLES=true
+      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
+      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+
+  connector-misp-feed-rwx:
+    image: opencti/connector-misp-feed:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${MISP_FEED_RWX_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=MISP Feed RWX
+      - CONNECTOR_SCOPE=misp-feed
+      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_DURATION_PERIOD=PT1H
+      - MISP_FEED_SOURCE_TYPE=url
+      - MISP_FEED_URL=${MISP_FEED_RWX_URL}
       - MISP_FEED_SSL_VERIFY=true
       - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
       - MISP_FEED_CREATE_REPORTS=true

@@ -47,6 +47,8 @@ _PERSON_TITLES = {
     "analyst",
 }
 
+_SOURCE_LABELS = ["source:enrich-text"]
+
 
 def _select_opencti_token() -> str:
     return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
@@ -165,7 +167,7 @@ class EnrichTextConnector:
                     self.client.create_note(
                         f"Summary\n\n{summary}",
                         object_refs=[entity_id],
-                        labels=["summary", "source:enrich-text"],
+                        labels=["summary", *_SOURCE_LABELS],
                     )
         cves = extract_cves(text)
         iocs = extract_iocs(text)
@@ -180,6 +182,7 @@ class EnrichTextConnector:
                 continue
             vuln_id = self.client.create_vulnerability(cve)
             if vuln_id:
+                self.client.add_labels(vuln_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, vuln_id, "related-to")
         for url in iocs["urls"]:
             seen_key = _seen_key(state_prefix, entity_id, f"url:{url}")
@@ -187,6 +190,7 @@ class EnrichTextConnector:
                 continue
             obs_id = self.client.create_observable("Url", url)
             if obs_id:
+                self.client.add_labels(obs_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, obs_id, "related-to")
         for domain in iocs["domains"]:
             seen_key = _seen_key(state_prefix, entity_id, f"domain:{domain}")
@@ -194,6 +198,7 @@ class EnrichTextConnector:
                 continue
             obs_id = self.client.create_observable("Domain-Name", domain)
             if obs_id:
+                self.client.add_labels(obs_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, obs_id, "related-to")
         for ip in iocs["ipv4"]:
             seen_key = _seen_key(state_prefix, entity_id, f"ip:{ip}")
@@ -201,6 +206,7 @@ class EnrichTextConnector:
                 continue
             obs_id = self.client.create_observable(_observable_type_for_ip(ip), ip)
             if obs_id:
+                self.client.add_labels(obs_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, obs_id, "related-to")
         for asn in iocs["asns"]:
             seen_key = _seen_key(state_prefix, entity_id, f"asn:{asn}")
@@ -208,6 +214,7 @@ class EnrichTextConnector:
                 continue
             obs_id = self.client.create_observable("Autonomous-System", asn)
             if obs_id:
+                self.client.add_labels(obs_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, obs_id, "related-to")
         for sha256 in iocs.get("sha256", []):
             seen_key = _seen_key(state_prefix, entity_id, f"sha256:{sha256}")
@@ -215,6 +222,7 @@ class EnrichTextConnector:
                 continue
             file_id = self.client.create_file_hash("SHA-256", sha256)
             if file_id:
+                self.client.add_labels(file_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, file_id, "related-to")
         for sha1 in iocs.get("sha1", []):
             seen_key = _seen_key(state_prefix, entity_id, f"sha1:{sha1}")
@@ -222,6 +230,7 @@ class EnrichTextConnector:
                 continue
             file_id = self.client.create_file_hash("SHA-1", sha1)
             if file_id:
+                self.client.add_labels(file_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, file_id, "related-to")
         for md5 in iocs.get("md5", []):
             seen_key = _seen_key(state_prefix, entity_id, f"md5:{md5}")
@@ -229,6 +238,7 @@ class EnrichTextConnector:
                 continue
             file_id = self.client.create_file_hash("MD5", md5)
             if file_id:
+                self.client.add_labels(file_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, file_id, "related-to")
         for country in iocs["countries"]:
             seen_key = _seen_key(state_prefix, entity_id, f"country:{country}")
@@ -236,6 +246,7 @@ class EnrichTextConnector:
                 continue
             country_id = self.client.create_country(country)
             if country_id:
+                self.client.add_labels(country_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, country_id, "related-to")
         for person in entities.get("persons", []):
             if not _is_valid_person(person):
@@ -245,6 +256,7 @@ class EnrichTextConnector:
                 continue
             person_id = self.client.create_identity(person, "Individual")
             if person_id:
+                self.client.add_labels(person_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, person_id, "related-to")
         for org in entities.get("organizations", []):
             seen_key = _seen_key(state_prefix, entity_id, f"org:{org}")
@@ -252,6 +264,7 @@ class EnrichTextConnector:
                 continue
             org_id = self.client.create_identity(org, "Organization")
             if org_id:
+                self.client.add_labels(org_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, org_id, "related-to")
         for product in entities.get("products", []):
             seen_key = _seen_key(state_prefix, entity_id, f"product:{product}")
@@ -259,6 +272,7 @@ class EnrichTextConnector:
                 continue
             product_id = self.client.create_software(product)
             if product_id:
+                self.client.add_labels(product_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, product_id, "related-to")
         for country in entities.get("countries", []):
             seen_key = _seen_key(state_prefix, entity_id, f"entity-country:{country}")
@@ -266,6 +280,7 @@ class EnrichTextConnector:
                 continue
             country_id = self.client.create_country(country)
             if country_id:
+                self.client.add_labels(country_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, country_id, "related-to")
         for technique in attack_patterns:
             seen_key = _seen_key(state_prefix, entity_id, f"attack:{technique}")
@@ -273,6 +288,7 @@ class EnrichTextConnector:
                 continue
             attack_id = self.client.create_attack_pattern(technique)
             if attack_id:
+                self.client.add_labels(attack_id, _SOURCE_LABELS)
                 self.client.create_relationship(entity_id, attack_id, "related-to")
         self._add_rule_notes(entity_id, state_prefix, "yara", yara_rules)
         self._add_rule_notes(entity_id, state_prefix, "sigma", sigma_rules)
@@ -298,11 +314,12 @@ class EnrichTextConnector:
             if not self.state.remember_hash("enrich", seen_key):
                 continue
             title = f"{rule_type.upper()} rule {idx}"
-            content = f"{title}\n\n{rule_text}"
+            content = f"{title}\n\nParent: {entity_id}\n\n```{rule_type}\n{rule_text}\n```"
             self.client.create_note(
                 content,
                 object_refs=[entity_id],
-                labels=[f"rule:{rule_type}", "source:enrich-text"],
+                labels=[f"rule:{rule_type}", *_SOURCE_LABELS],
+                raw=True,
             )
 
     def _run(self) -> None:

@@ -256,6 +256,37 @@ class OpenCTIClient:
                     return
                 continue
 
+    def add_labels(self, object_id: str, labels: list[str]) -> bool:
+        if not self.admin_token or not object_id or not labels:
+            return False
+        label_ids = self._ensure_label_ids(labels)
+        if not label_ids:
+            return False
+        patch = [{"key": "objectLabel", "operation": "add", "value": label_ids}]
+        mutations = [
+            """
+            mutation StixDomainEdit($id: ID!, $input: [EditInput]!) {
+              stixDomainObjectEdit(id: $id) {
+                fieldPatch(input: $input) { id }
+              }
+            }
+            """,
+            """
+            mutation StixObservableEdit($id: ID!, $input: [EditInput]!) {
+              stixCyberObservableEdit(id: $id) {
+                fieldPatch(input: $input) { id }
+              }
+            }
+            """,
+        ]
+        for mutation in mutations:
+            try:
+                self._post(mutation, {"id": object_id, "input": patch})
+                return True
+            except Exception:
+                continue
+        return False
+
     def update_report_description(self, report_id: str, description: str) -> bool:
         if not self.admin_token or not report_id or not description:
             return False
@@ -762,6 +793,7 @@ class OpenCTIClient:
         created_by_id: str | None = None,
         labels: list[str] | None = None,
         confidence: int | None = None,
+        raw: bool = False,
     ) -> str | None:
         if not self.admin_token or not content:
             return None
@@ -770,7 +802,9 @@ class OpenCTIClient:
           noteAdd(input: $input) { id }
         }
         """
-        payload: dict[str, Any] = {"content": escape_markdown(content.strip())}
+        payload: dict[str, Any] = {
+            "content": content.strip() if raw else escape_markdown(content.strip())
+        }
         if object_refs:
             payload["objects"] = object_refs
         if created_by_id:

@@ -87,6 +87,8 @@ def fetch_items(client: zotero.Zotero, since_version: str | None) -> tuple[list[
         items.extend(page)
         page_count += 1
     last_version = getattr(client, "last_modified_version", None)
+    if callable(last_version):
+        last_version = last_version()
     logger.info("zotero_items pages=%s items=%s", page_count, len(items))
     return items, last_version, page_count
 
@@ -430,6 +432,8 @@ class ZoteroConnector:
                 return
             work = WorkTracker(self.helper, "Zotero import")
             since_version = self.state.get("last_version")
+            if not isinstance(since_version, (str, int)):
+                since_version = None
             since_fulltext_version = self.state.get("last_fulltext_version")
             cutoff_dt = None
             if not since_version and self.zotero_lookback_days > 0:
