@@ -126,7 +126,7 @@ services:
     environment:
       - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
       - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - WORKER_LOG_LEVEL=${OPENCTI_WORKER_LOG_LEVEL:-warning}
+      - WORKER_LOG_LEVEL=${OPENCTI_WORKER_LOG_LEVEL:-info}
     depends_on:
       opencti:
         condition: service_healthy
@@ -196,7 +196,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=miniflux
       - CONNECTOR_SCOPE=miniflux
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-600}
       - MINIFLUX_URL=${MINIFLUX_URL}
       - MINIFLUX_API_KEY=${MINIFLUX_API_KEY}
@@ -229,7 +229,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=readwise
       - CONNECTOR_SCOPE=readwise
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-600}
       - READWISE_API_KEY=${READWISE_API_KEY}
       - TI_MAPPING_DB=${TI_MAPPING_DB:-/data/mapping/ti-mapping.sqlite}
@@ -261,7 +261,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=zotero
       - CONNECTOR_SCOPE=zotero
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-600}
       - ZOTERO_API_KEY=${ZOTERO_API_KEY}
       - ZOTERO_LIBRARY_ID=${ZOTERO_LIBRARY_ID}
@@ -297,7 +297,7 @@ services:
       - CONNECTOR_TYPE=INTERNAL_ENRICHMENT
       - CONNECTOR_NAME=enrich-text
       - CONNECTOR_SCOPE=text-enrichment
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-900}
       - ENRICH_LOOKBACK_DAYS=${ENRICH_LOOKBACK_DAYS:-7}
       - TI_ENRICH_SOURCES=${TI_ENRICH_SOURCES:-miniflux,readwise,zotero}
@@ -351,7 +351,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=CVE List V5
       - CONNECTOR_SCOPE=vulnerability
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CVELIST_REPO_URL=${CVELIST_REPO_URL:-https://github.com/CVEProject/cvelistV5.git}
       - CVELIST_BRANCH=${CVELIST_BRANCH:-main}
       - CONNECTOR_RUN_INTERVAL_SECONDS=${CVELIST_RUN_INTERVAL_SECONDS:-3600}
@@ -378,7 +378,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=CISA KEV
       - CONNECTOR_SCOPE=vulnerability
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL=21600
       - CONNECTOR_UPDATE_EXISTING_DATA=true
     restart: unless-stopped
@@ -397,7 +397,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=MITRE ATT&CK
       - CONNECTOR_SCOPE=attack-pattern,intrusion-set,malware,tool,campaign,course-of-action,relationship,identity,location
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL=86400
       - CONNECTOR_UPDATE_EXISTING_DATA=true
     restart: unless-stopped
@@ -416,7 +416,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=abuse.ch ThreatFox
       - CONNECTOR_SCOPE=indicator,malware,threat-actor
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL=3600
       - CONNECTOR_UPDATE_EXISTING_DATA=true
     restart: unless-stopped
@@ -435,7 +435,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=AlienVault
       - CONNECTOR_SCOPE=alienvault
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_DURATION_PERIOD=PT10M
       - ALIENVAULT_BASE_URL=${ALIENVAULT_BASE_URL:-https://otx.alienvault.com}
       - ALIENVAULT_API_KEY=${ALIENVAULT_API_KEY}
@@ -467,7 +467,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=Abuse.ch URLhaus
       - CONNECTOR_SCOPE=urlhaus
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - URLHAUS_INTERVAL=3
       - URLHAUS_CSV_URL=https://urlhaus.abuse.ch/downloads/csv_recent/
       - URLHAUS_DEFAULT_X_OPENCTI_SCORE=80
@@ -488,7 +488,7 @@ services:
       - CONNECTOR_ID=${RANSOMWARELIVE_CONNECTOR_ID}
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=Ransomware Connector
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_DURATION_PERIOD=PT10M
       - CONNECTOR_PULL_HISTORY=false
       - CONNECTOR_HISTORY_START_YEAR=2023
@@ -532,7 +532,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=MalwareBazaar
       - CONNECTOR_SCOPE=StixFile
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_DURATION_PERIOD=PT50M
       - MALWAREBAZAAR_API_BASE_URL=https://mb-api.abuse.ch/api/v1/
       - MALWAREBAZAAR_API_KEY=${MALWAREBAZAAR_API_KEY}
@@ -557,7 +557,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=Abuse.ch SSL Blacklist
       - CONNECTOR_SCOPE=abusessl
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - ABUSESSL_URL=https://sslbl.abuse.ch/blacklist/sslipblacklist.csv
       - ABUSESSL_INTERVAL=360
     restart: unless-stopped
@@ -578,7 +578,7 @@ services:
       - CONNECTOR_SCOPE=Artifact
       - CONNECTOR_AUTO=true
       - CONNECTOR_CONFIDENCE_LEVEL=80
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
     restart: unless-stopped
     depends_on:
       opencti:
@@ -595,7 +595,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=MISP Feed
       - CONNECTOR_SCOPE=misp-feed
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_DURATION_PERIOD=PT1H
       - MISP_FEED_SOURCE_TYPE=url
       - MISP_FEED_URL=${MISP_FEED_URL}
@@ -623,94 +623,10 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=MISP Feed DigitalSide
       - CONNECTOR_SCOPE=misp-feed
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_DURATION_PERIOD=PT1H
       - MISP_FEED_SOURCE_TYPE=url
       - MISP_FEED_URL=${MISP_FEED_DIGITALSIDE_URL}
-      - MISP_FEED_SSL_VERIFY=true
-      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
-      - MISP_FEED_CREATE_REPORTS=true
-      - MISP_FEED_REPORT_TYPE=misp-event
-      - MISP_FEED_CREATE_INDICATORS=true
-      - MISP_FEED_CREATE_OBSERVABLES=true
-      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
-      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
-    restart: unless-stopped
-    depends_on:
-      opencti:
-        condition: service_healthy
-
-  connector-misp-feed-abusech-bazaar:
-    image: opencti/connector-misp-feed:latest
-    env_file:
-      - .env
-    environment:
-      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
-      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - CONNECTOR_ID=${MISP_FEED_ABUSECH_BAZAAR_CONNECTOR_ID}
-      - CONNECTOR_TYPE=EXTERNAL_IMPORT
-      - CONNECTOR_NAME=MISP Feed Abuse.ch Bazaar
-      - CONNECTOR_SCOPE=misp-feed
-      - CONNECTOR_LOG_LEVEL=warning
-      - CONNECTOR_DURATION_PERIOD=PT1H
-      - MISP_FEED_SOURCE_TYPE=url
-      - MISP_FEED_URL=${MISP_FEED_ABUSECH_BAZAAR_URL}
-      - MISP_FEED_SSL_VERIFY=true
-      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
-      - MISP_FEED_CREATE_REPORTS=true
-      - MISP_FEED_REPORT_TYPE=misp-event
-      - MISP_FEED_CREATE_INDICATORS=true
-      - MISP_FEED_CREATE_OBSERVABLES=true
-      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
-      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
-    restart: unless-stopped
-    depends_on:
-      opencti:
-        condition: service_healthy
-
-  connector-misp-feed-abusech-threatfox:
-    image: opencti/connector-misp-feed:latest
-    env_file:
-      - .env
-    environment:
-      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
-      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - CONNECTOR_ID=${MISP_FEED_ABUSECH_THREATFOX_CONNECTOR_ID}
-      - CONNECTOR_TYPE=EXTERNAL_IMPORT
-      - CONNECTOR_NAME=MISP Feed Abuse.ch ThreatFox
-      - CONNECTOR_SCOPE=misp-feed
-      - CONNECTOR_LOG_LEVEL=warning
-      - CONNECTOR_DURATION_PERIOD=PT1H
-      - MISP_FEED_SOURCE_TYPE=url
-      - MISP_FEED_URL=${MISP_FEED_ABUSECH_THREATFOX_URL}
-      - MISP_FEED_SSL_VERIFY=true
-      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
-      - MISP_FEED_CREATE_REPORTS=true
-      - MISP_FEED_REPORT_TYPE=misp-event
-      - MISP_FEED_CREATE_INDICATORS=true
-      - MISP_FEED_CREATE_OBSERVABLES=true
-      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
-      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
-    restart: unless-stopped
-    depends_on:
-      opencti:
-        condition: service_healthy
-
-  connector-misp-feed-abusech-urlhaus:
-    image: opencti/connector-misp-feed:latest
-    env_file:
-      - .env
-    environment:
-      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
-      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - CONNECTOR_ID=${MISP_FEED_ABUSECH_URLHAUS_CONNECTOR_ID}
-      - CONNECTOR_TYPE=EXTERNAL_IMPORT
-      - CONNECTOR_NAME=MISP Feed Abuse.ch URLhaus
-      - CONNECTOR_SCOPE=misp-feed
-      - CONNECTOR_LOG_LEVEL=warning
-      - CONNECTOR_DURATION_PERIOD=PT1H
-      - MISP_FEED_SOURCE_TYPE=url
-      - MISP_FEED_URL=${MISP_FEED_ABUSECH_URLHAUS_URL}
       - MISP_FEED_SSL_VERIFY=true
       - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
       - MISP_FEED_CREATE_REPORTS=true
@@ -735,7 +651,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=MISP Feed RWX
       - CONNECTOR_SCOPE=misp-feed
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_DURATION_PERIOD=PT1H
       - MISP_FEED_SOURCE_TYPE=url
       - MISP_FEED_URL=${MISP_FEED_RWX_URL}
@@ -763,7 +679,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=MISP Feed Botvrij
       - CONNECTOR_SCOPE=misp-feed
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_DURATION_PERIOD=PT1H
       - MISP_FEED_SOURCE_TYPE=url
       - MISP_FEED_URL=${MISP_FEED_BOTVRIJ_URL}
@@ -791,7 +707,7 @@ services:
       - CONNECTOR_TYPE=INTERNAL_ENRICHMENT
       - CONNECTOR_NAME=FIRST EPSS
       - CONNECTOR_SCOPE=vulnerability
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL=86400
       - CONNECTOR_UPDATE_EXISTING_DATA=true
       - FIRST_EPSS_API_KEY=${FIRST_EPSS_API_KEY}
@@ -811,7 +727,7 @@ services:
       - CONNECTOR_TYPE=INTERNAL_ENRICHMENT
       - CONNECTOR_SCOPE=StixFile,Artifact,IPv4-Addr,IPv6-Addr,Url,Domain-Name
       - CONNECTOR_NAME=VirusTotal
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL=3600
       - CONNECTOR_UPDATE_EXISTING_DATA=true
       - VIRUSTOTAL_TOKEN=${VIRUSTOTAL_TOKEN}
@@ -831,7 +747,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=Shodan InternetDB
       - CONNECTOR_SCOPE=ipv4-addr,hostname
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL=3600
       - CONNECTOR_UPDATE_EXISTING_DATA=true
       - SHODAN_TOKEN=${SHODAN_TOKEN}
@@ -851,7 +767,7 @@ services:
       - CONNECTOR_TYPE=INTERNAL_ENRICHMENT
       - CONNECTOR_NAME=Shodan
       - CONNECTOR_SCOPE=ipv4-addr,hostname
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL=3600
       - CONNECTOR_UPDATE_EXISTING_DATA=true
       - SHODAN_TOKEN=${SHODAN_TOKEN}
@@ -871,7 +787,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=OpenCTI Datasets
       - CONNECTOR_SCOPE=collection
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL=86400
       - CONNECTOR_UPDATE_EXISTING_DATA=true
     restart: unless-stopped
@@ -894,7 +810,7 @@ services:
       - CONNECTOR_TYPE=EXTERNAL_IMPORT
       - CONNECTOR_NAME=Awesome Annual Security Reports
       - CONNECTOR_SCOPE=awesome-annual-security-reports
-      - CONNECTOR_LOG_LEVEL=warning
+      - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL_SECONDS=${AWESOME_ASR_RUN_INTERVAL_SECONDS:-21600}
       - AWESOME_ASR_GITHUB_OWNER=${AWESOME_ASR_GITHUB_OWNER:-jacobdjwilson}
       - AWESOME_ASR_GITHUB_REPO=${AWESOME_ASR_GITHUB_REPO:-awesome-annual-security-reports}
