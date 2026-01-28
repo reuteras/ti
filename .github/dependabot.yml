@@ -1,30 +1,98 @@
 version: 2
 updates:
+  - package-ecosystem: "docker"
+    directory: "/services/briefing"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "docker"
+    directory: "/services/connectors/awesome_annual_security_reports"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "docker"
+    directory: "/services/connectors/cvelist"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "docker"
+    directory: "/services/connectors/enrich_text"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "docker"
+    directory: "/services/connectors/miniflux"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "docker"
+    directory: "/services/connectors/readwise"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "docker"
+    directory: "/services/connectors/zotero"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "uv"
     directory: "/services/briefing"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "uv"
+    directory: "/services/connectors/awesome_annual_security_reports"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "uv"
     directory: "/services/connectors/common"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "uv"
     directory: "/services/connectors/cvelist"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "uv"
+    directory: "/services/connectors/enrich_text"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "uv"
     directory: "/services/connectors/miniflux"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "uv"
     directory: "/services/connectors/readwise"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "uv"
     directory: "/services/connectors/zotero"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
