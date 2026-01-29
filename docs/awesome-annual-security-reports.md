@@ -4,7 +4,7 @@
 
 Implement an OpenCTI **external import connector** that ingests reports from the GitHub repository:
 
-https://github.com/jacobdjwilson/awesome-annual-security-reports
+[https://github.com/jacobdjwilson/awesome-annual-security-reports](https://github.com/jacobdjwilson/awesome-annual-security-reports)
 
 The connector must **not clone the full repository** (currently ~8.5 GB). Instead, it should:
 - Detect new or changed report files in the repo
@@ -127,8 +127,8 @@ Always include:
 - Raw PDF URL (direct download)
 
 Example:
-- https://github.com/<owner>/<repo>/blob/<ref>/<pdf_path>
-- https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<pdf_path>
+- [https://github.com/<owner>/<repo>/blob/<ref>/<pdf_path>](https://github.com/<owner>/<repo>/blob/<ref>/<pdf_path>)
+- [https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<pdf_path>](https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<pdf_path>)
 
 ### 3. Markdown content
 If Markdown exists:
@@ -195,4 +195,3 @@ Optional:
 
 The end result should be a clean OpenCTI library of annual security reports,
 queryable by year, source, and topic, with Markdown available for downstream analysis.
-

@@ -54,7 +54,7 @@ Implement a Dockerized connector/service in this repo that:
     - pyproject.toml (preferred) or requirements.txt
     - src/
       - zotero_fulltext_connector/
-        - __init__.py
+        - `__init__.py`
         - main.py
         - config.py
         - zotero_client.py
@@ -75,7 +75,7 @@ Follow existing repo conventions if a connector pattern already exists.
 ### Zotero
 - ZOTERO_API_KEY (required)
 - ZOTERO_USER_ID (required, user library)
-- ZOTERO_API_BASE (optional, default https://api.zotero.org)
+- ZOTERO_API_BASE (optional, default [https://api.zotero.org](https://api.zotero.org))
 - ZOTERO_PAGE_SIZE (optional, default 100)
 
 ### OpenCTI

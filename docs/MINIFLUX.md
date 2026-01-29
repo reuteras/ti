@@ -1,6 +1,13 @@
 # Miniflux -> OpenCTI ingestion (read-only Miniflux) using Miniflux Python API
 
-Goal: Ingest RSS entries from a **local Miniflux** instance into **OpenCTI** as **STIX 2.1** via an **OpenCTI external-import connector**. The connector MUST be **read-only** towards Miniflux (no marking read, no edits). It MUST import **since last run** (stateful incremental). It MUST ingest **as much text as possible** from entries. It MUST do **deep extraction** (ATT&CK, CVEs, IOCs, YARA/Sigma/Snort, actors/malware) and create relationships for correlation. Dedup MUST be **URL-first**, with Miniflux entry ID as secondary.
+Goal: Ingest RSS entries from a **local Miniflux** instance into **OpenCTI**
+as **STIX 2.1** via an **OpenCTI external-import connector**.
+The connector MUST be **read-only** towards Miniflux (no marking read, no edits).
+It MUST import **since last run** (stateful incremental).
+It MUST ingest **as much text as possible** from entries.
+It MUST do **deep extraction** (ATT&CK, CVEs, IOCs, YARA/Sigma/Snort, actors/malware)
+and create relationships for correlation.
+Dedup MUST be **URL-first**, with Miniflux entry ID as secondary.
 
 ## High-level approach
 
@@ -203,9 +210,9 @@ Use connector state:
 ## Configuration (env vars)
 
 Required:
-- `MINIFLUX_URL` (e.g., http://miniflux:8080)
+- `MINIFLUX_URL` (e.g., [http://miniflux:8080](http://miniflux:8080))
 - `MINIFLUX_API_KEY`
-- `OPENCTI_URL` (e.g., http://opencti:8080)
+- `OPENCTI_URL` (e.g., [http://opencti:8080](http://opencti:8080))
 - `OPENCTI_TOKEN`
 - `CONNECTOR_ID` (uuid)
 - `CONNECTOR_NAME` (e.g., Miniflux)

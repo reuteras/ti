@@ -1,6 +1,6 @@
 # OpenCTI Ingestion Workflow: Readwise + Zotero + RSS/Miniflux → Canonical Objects + Evidence + Relationship Stitching
 
-Repo: https://github.com/reuteras/ti
+Repo: [https://github.com/reuteras/ti](https://github.com/reuteras/ti)
 
 Goal: “I saved/highlighted something anywhere → it lands in OpenCTI once, with strong provenance, and links across sources.”
 Sources include (but are not limited to): Readwise Reader links, web articles, PDFs, podcasts, and Zotero library items (PDFs + metadata + highlights). Podcasts are just one content type; the workflow must be source-agnostic.
@@ -44,7 +44,7 @@ Primary stable keys, in priority order, per item:
 
 Implement a shared library in the repo and multiple connectors that all use it:
 
-```
+```text
 ti/
 ├── connectors/
 │   ├── import_readwise/
@@ -199,24 +199,24 @@ De-dup external references by canonical URL hash.
 
 ## Connector: import_readwise (general-purpose, not podcast-centric)
 
-### Purpose
+### Purpose (Readwise)
 Import Readwise Reader documents + highlights for ALL content types:
 - web articles (most common)
 - PDFs saved into Reader
 - podcasts (if present)
 - any other Reader docs
 
-### Inputs
+### Inputs (Readwise)
 - Readwise document metadata (title, source URL, author, tags, created/updated timestamps)
 - highlights (id, text, note/comment, location metadata)
 
-### Output
+### Output (Readwise)
 - Canonical `Report` per document
 - `Note` per highlight
 - External references attached
 - Optional: extracted links from the document (see linking strategy)
 
-### Identity & dedup
+### Identity & dedup (Readwise)
 CandidateIdentity for a Readwise doc:
 - `external_ids`: `('readwise_doc', document_id)`
 - `urls`: document/source URL(s)
@@ -252,10 +252,10 @@ Configuration:
 
 ## Connector: import_zotero (PDF-centric, metadata-rich)
 
-### Purpose
+### Purpose (Zotero)
 Import Zotero library items (PDFs/papers/reports/articles) with rich metadata + annotations/highlights.
 
-### Inputs
+### Inputs (Zotero)
 Zotero item data:
 - item key (stable)
 - title
@@ -266,7 +266,7 @@ Zotero item data:
 - attachments (PDF file path or link)
 - annotations/highlights (text, comment, page, position, annotation key if available)
 
-### Output
+### Output (Zotero)
 - Canonical `Report` per Zotero item
 - `Note` per annotation/highlight
 - External references:
@@ -274,7 +274,7 @@ Zotero item data:
   - URL (publisher page)
   - local file reference only if your OpenCTI deployment supports attachments safely (optional and configurable)
 
-### Identity & dedup
+### Identity & dedup (Zotero)
 CandidateIdentity for a Zotero item:
 - `external_ids`: `('zotero_item', item_key)`
 - `doi` if present (highest priority)

@@ -59,11 +59,11 @@ The stack also runs official OpenCTI connectors for public datasets and enrichme
 Note: NVD is not used; CVE coverage comes primarily from CISA KEV + OpenCTI Datasets.
 
 ## Miniflux connector
-### Inputs
+### Inputs (Miniflux)
 - MINIFLUX_URL
 - MINIFLUX_API_KEY
 
-### Incremental strategy
+### Incremental strategy (Miniflux)
 - Cursor based on miniflux entry IDs and/or "updated_at".
 - Store last_run timestamp and last_entry_id per feed (or global).
 
@@ -72,10 +72,10 @@ Note: NVD is not used; CVE coverage comes primarily from CISA KEV + OpenCTI Data
 - Optionally mark entries as "read" after ingestion (feature-flagged, default off)
 
 ## Readwise connector
-### Inputs
+### Inputs (Readwise)
 - READWISE_API_KEY
 
-### Incremental strategy
+### Incremental strategy (Readwise)
 - Use "updatedAfter" style parameter if available; otherwise poll and diff by updated timestamp
 - Treat highlights as Notes linked to the parent Report
 ### Optional link extraction
@@ -83,10 +83,10 @@ Note: NVD is not used; CVE coverage comes primarily from CISA KEV + OpenCTI Data
 - TI_READWISE_LOOKBACK_DAYS=14 (initial backfill window)
 
 ## Zotero connector
-### Inputs
+### Inputs (Zotero)
 - ZOTERO_API_KEY, ZOTERO_LIBRARY_ID, ZOTERO_LIBRARY_TYPE
 
-### Incremental strategy
+### Incremental strategy (Zotero)
 - Zotero has a library version; store last seen version.
 - Treat annotations as Notes linked to the parent Report
 - TI_ZOTERO_LOOKBACK_DAYS=30 (initial backfill window)

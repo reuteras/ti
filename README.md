@@ -1,8 +1,6 @@
-# ti
-
 # personal-cti (OpenCTI-first)
 
-Personal Threat Intel platform:
+Personal Threat Intel platform (ti):
 - OpenCTI as the primary knowledge base (STIX 2.1 / graph UI / ATT&CK objects)
 - Custom connectors for personal sources:
   - Miniflux (RSS)
@@ -26,9 +24,10 @@ Personal Threat Intel platform:
 2) Run:
    ```bash
    docker compose up -d --build
+   ```
 3) Open:
-- OpenCTI UI: <http://localhost:8080>
-- Briefing service: <http://localhost:8088>
+- OpenCTI UI: [http://localhost:8080](http://localhost:8080)
+- Briefing service: [http://localhost:8088](http://localhost:8088)
 
 OpenCTI’s “official” way for connectors is typically via their connector framework and/or the OpenCTI Python client. Codex should:
 - Prefer the official OpenCTI Python client / connector patterns if feasible
