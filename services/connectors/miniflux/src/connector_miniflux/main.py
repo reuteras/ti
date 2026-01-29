@@ -16,6 +16,7 @@ from connectors_common.identity import CandidateIdentity, resolve_canonical_id, 
 from connectors_common.mapping_store import MappingStore
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
 from connectors_common.enrichment import source_confidence, source_labels
+from connectors_common.connector_state import ConnectorState
 from connectors_common.state_store import StateStore
 from connectors_common.denylist import filter_values
 from connectors_common.text_utils import extract_main_text, format_readable_text
@@ -204,237 +205,291 @@ class MinifluxConnector:
         return author_id
 
     def _run(self) -> None:
-        if not self.base_url or not self.token:
-            logger.warning("miniflux_not_configured")
-            return
+        run_state = ConnectorState(self.helper, "Miniflux")
+        run_state.start()
+        metrics = {
+            "entries_total": 0,
+            "entries_processed": 0,
+            "entries_skipped": 0,
+            "entries_eligible": 0,
+            "reports_created": 0,
+            "reports_matched": 0,
+            "reports_failed": 0,
+            "notes_created": 0,
+            "external_refs_added": 0,
+        }
+        try:
+            if not self.base_url or not self.token:
+                logger.warning("miniflux_not_configured")
+                run_state.skipped("not_configured", **metrics)
+                return
 
-        work = WorkTracker(self.helper, "Miniflux import")
-        approved_feed_ids = fetch_approved_feed_ids(self.briefing_url)
-        if not approved_feed_ids:
-            logger.info("miniflux_no_approved_feeds")
-            work.done("No approved feeds")
-            return
-        work.log(f"approved_feeds={len(approved_feed_ids)}")
+            work = WorkTracker(self.helper, "Miniflux import")
+            approved_feed_ids = fetch_approved_feed_ids(self.briefing_url)
+            if not approved_feed_ids:
+                logger.info("miniflux_no_approved_feeds")
+                work.done("No approved feeds")
+                run_state.skipped("no_approved_feeds", **metrics)
+                return
+            work.log(f"approved_feeds={len(approved_feed_ids)}")
 
-        last_id = int(self.state.get("last_entry_id", 0) or 0)
-        last_published_raw = self.state.get("last_published_at")
-        if last_published_raw:
-            cutoff_dt = isoparse(last_published_raw)
-        else:
-            cutoff_dt = datetime.now(timezone.utc) - timedelta(days=self.lookback_days)
+            last_id = int(self.state.get("last_entry_id", 0) or 0)
+            last_published_raw = self.state.get("last_published_at")
+            if last_published_raw:
+                cutoff_dt = isoparse(last_published_raw)
+            else:
+                cutoff_dt = datetime.now(timezone.utc) - timedelta(days=self.lookback_days)
 
-        recent_reports = self.client.list_reports_since(datetime.now(timezone.utc) - timedelta(days=self.dedup_days))
-        candidates = prepare_candidates(recent_reports)
+            recent_reports = self.client.list_reports_since(
+                datetime.now(timezone.utc) - timedelta(days=self.dedup_days)
+            )
+            candidates = prepare_candidates(recent_reports)
 
-        max_published_dt = cutoff_dt
-        max_entry_id = last_id
-        offset = 0
-        limit = 100
-        total_entries = 0
-        processed_entries = 0
+            max_published_dt = cutoff_dt
+            max_entry_id = last_id
+            offset = 0
+            limit = 100
+            total_entries = 0
+            processed_entries = 0
 
-        while True:
-            entries = fetch_entries(self.base_url, self.token, offset, limit)
-            if not entries:
-                break
-            total_entries += len(entries)
-            reached_cutoff = False
-            for entry in entries:
-                processed_entries += 1
-                if processed_entries % 50 == 0:
-                    work.progress(None, f"processed_entries={processed_entries}")
-                entry_id = int(entry.get("id", 0) or 0)
-                feed_id = int(entry.get("feed_id", 0) or 0)
-                if feed_id not in approved_feed_ids:
-                    continue
-                published = entry.get("published_at") or entry.get("updated_at") or entry.get("created_at")
-                if not published:
-                    published_dt = datetime.now(timezone.utc)
-                else:
-                    published_dt = isoparse(published)
+            while True:
+                entries = fetch_entries(self.base_url, self.token, offset, limit)
+                if not entries:
+                    break
+                total_entries += len(entries)
+                reached_cutoff = False
+                for entry in entries:
+                    processed_entries += 1
+                    if processed_entries % 50 == 0:
+                        work.progress(None, f"processed_entries={processed_entries}")
+                    entry_id = int(entry.get("id", 0) or 0)
+                    feed_id = int(entry.get("feed_id", 0) or 0)
+                    if feed_id not in approved_feed_ids:
+                        metrics["entries_skipped"] += 1
+                        continue
+                    published = entry.get("published_at") or entry.get("updated_at") or entry.get("created_at")
+                    if not published:
+                        published_dt = datetime.now(timezone.utc)
+                    else:
+                        published_dt = isoparse(published)
 
-                if published_dt < cutoff_dt or (published_dt == cutoff_dt and entry_id <= last_id):
-                    reached_cutoff = True
-                    continue
+                    if published_dt < cutoff_dt or (published_dt == cutoff_dt and entry_id <= last_id):
+                        reached_cutoff = True
+                        metrics["entries_skipped"] += 1
+                        continue
 
-                source_url = canonicalize_url(entry.get("url") or "")
-                url_digest = url_hash(source_url)
+                    metrics["entries_eligible"] += 1
 
-                content_html = entry.get("content") or ""
-                summary_html = entry.get("summary") or ""
-                base_html = content_html or summary_html
-                text = extract_main_text(base_html)
-                if _text_too_short(text):
-                    source_html = _fetch_source_text(source_url)
-                    if source_html:
-                        text = extract_main_text(source_html)
-                text = format_readable_text(text)
-                if _text_too_short(text):
-                    text = "No data from source."
-                content_fp = content_fingerprint(text)
-                labels = ["source:miniflux"] + source_labels("miniflux")
-                feed_title = ""
-                feed_meta = entry.get("feed") or {}
-                if isinstance(feed_meta, dict):
-                    feed_title = feed_meta.get("title") or ""
-                    feed_url = canonicalize_url(feed_meta.get("feed_url") or "")
-                    site_url = canonicalize_url(feed_meta.get("site_url") or "")
-                else:
-                    feed_url = ""
-                    site_url = ""
-                if not feed_title:
-                    feed_title = entry.get("feed_title") or ""
-                author_name = (entry.get("author") or "").strip()
-                author_ids: list[str] = []
-                authors = _split_authors(author_name)
-                author_id = None
-                if authors:
-                    author_name = "; ".join(authors)
-                    primary = authors[0]
-                    author_key = _author_key("miniflux", feed_id, source_url, primary)
-                    author_id = self._resolve_author(author_key, primary, "Individual")
-                    if author_id:
-                        author_ids.append(author_id)
-                    for name in authors[1:]:
-                        extra_key = _author_key("miniflux", feed_id, source_url, name)
-                        extra_id = self._resolve_author(extra_key, name, "Individual")
-                        if extra_id:
-                            author_ids.append(extra_id)
-                org_name = _derive_org_name(feed_title, source_url)
-                org_id = None
-                if org_name:
-                    org_key = _author_key("miniflux-org", feed_id, source_url, org_name)
-                    org_id = self._resolve_author(org_key, org_name, "Organization")
+                    source_url = canonicalize_url(entry.get("url") or "")
+                    url_digest = url_hash(source_url)
 
-                confidence = source_confidence("miniflux")
-                if confidence is None:
-                    confidence = self.default_confidence
-                report = ReportInput(
-                    title=entry.get("title") or "Miniflux entry",
-                    description=text,
-                    published=published_dt.isoformat(),
-                    source_name="miniflux",
-                    source_url=source_url or None,
-                    author=author_name or None,
-                    created_by_id=author_id,
-                    labels=labels,
-                    confidence=confidence,
-                    external_id=url_digest or None,
-                )
-                external_ids: list[tuple[str, str]] = []
-                guid = entry.get("guid")
-                if guid:
-                    external_ids.append(("rss_guid", str(guid)))
-                if entry_id:
-                    external_ids.append(("miniflux_entry", str(entry_id)))
-                candidate = CandidateIdentity(
-                    urls=[source_url] if source_url else [],
-                    external_ids=external_ids,
-                    content_fp=content_fp or None,
-                    title=report.title,
-                    published=published_dt.isoformat(),
-                )
-                report_id, match_reason = resolve_canonical_id(
-                    self.mapping,
-                    candidate,
-                    allow_title_fallback=self.allow_title_fallback,
-                )
-                if not report_id and self.allow_title_fallback:
-                    duplicate = find_best_match(report.title, candidates, self.dedup_threshold)
-                    if duplicate:
-                        report_id = duplicate.report_id
-                        match_reason = "title_similarity"
-                if not report_id:
-                    report_id = self.client.create_report(report)
-                if report_id:
-                    logger.info(
-                        "report_upserted source=miniflux id=%s title=%s match=%s",
-                        report_id,
-                        report.title,
-                        match_reason or "created",
+                    content_html = entry.get("content") or ""
+                    summary_html = entry.get("summary") or ""
+                    base_html = content_html or summary_html
+                    text = extract_main_text(base_html)
+                    if _text_too_short(text):
+                        source_html = _fetch_source_text(source_url)
+                        if source_html:
+                            text = extract_main_text(source_html)
+                    text = format_readable_text(text)
+                    if _text_too_short(text):
+                        text = "No data from source."
+                    content_fp = content_fingerprint(text)
+                    labels = ["source:miniflux"] + source_labels("miniflux")
+                    feed_title = ""
+                    feed_meta = entry.get("feed") or {}
+                    if isinstance(feed_meta, dict):
+                        feed_title = feed_meta.get("title") or ""
+                        feed_url = canonicalize_url(feed_meta.get("feed_url") or "")
+                        site_url = canonicalize_url(feed_meta.get("site_url") or "")
+                    else:
+                        feed_url = ""
+                        site_url = ""
+                    if not feed_title:
+                        feed_title = entry.get("feed_title") or ""
+                    author_name = (entry.get("author") or "").strip()
+                    author_ids: list[str] = []
+                    authors = _split_authors(author_name)
+                    author_id = None
+                    if authors:
+                        author_name = "; ".join(authors)
+                        primary = authors[0]
+                        author_key = _author_key("miniflux", feed_id, source_url, primary)
+                        author_id = self._resolve_author(author_key, primary, "Individual")
+                        if author_id:
+                            author_ids.append(author_id)
+                        for name in authors[1:]:
+                            extra_key = _author_key("miniflux", feed_id, source_url, name)
+                            extra_id = self._resolve_author(extra_key, name, "Individual")
+                            if extra_id:
+                                author_ids.append(extra_id)
+                    org_name = _derive_org_name(feed_title, source_url)
+                    org_id = None
+                    if org_name:
+                        org_key = _author_key("miniflux-org", feed_id, source_url, org_name)
+                        org_id = self._resolve_author(org_key, org_name, "Organization")
+
+                    confidence = source_confidence("miniflux")
+                    if confidence is None:
+                        confidence = self.default_confidence
+                    report = ReportInput(
+                        title=entry.get("title") or "Miniflux entry",
+                        description=text,
+                        published=published_dt.isoformat(),
+                        source_name="miniflux",
+                        source_url=source_url or None,
+                        author=author_name or None,
+                        created_by_id=author_id,
+                        labels=labels,
+                        confidence=confidence,
+                        external_id=url_digest or None,
                     )
-                    existing_url_owner = self.mapping.get_by_url_hash(url_digest)
-                    store_identity_mappings(self.mapping, report_id, "Report", candidate)
-                    should_add_ref = True
-                    if url_digest:
-                        should_add_ref = self.state.remember_hash(
-                            "external_ref",
-                            f"{report_id}:{url_digest}",
-                        )
-                    if source_url and existing_url_owner is None and should_add_ref:
-                        self.client.add_external_reference_to_report(
+                    external_ids: list[tuple[str, str]] = []
+                    guid = entry.get("guid")
+                    if guid:
+                        external_ids.append(("rss_guid", str(guid)))
+                    if entry_id:
+                        external_ids.append(("miniflux_entry", str(entry_id)))
+                    candidate = CandidateIdentity(
+                        urls=[source_url] if source_url else [],
+                        external_ids=external_ids,
+                        content_fp=content_fp or None,
+                        title=report.title,
+                        published=published_dt.isoformat(),
+                    )
+                    report_id, match_reason = resolve_canonical_id(
+                        self.mapping,
+                        candidate,
+                        allow_title_fallback=self.allow_title_fallback,
+                    )
+                    if not report_id and self.allow_title_fallback:
+                        duplicate = find_best_match(report.title, candidates, self.dedup_threshold)
+                        if duplicate:
+                            report_id = duplicate.report_id
+                            match_reason = "title_similarity"
+                    created_new = False
+                    if not report_id:
+                        report_id = self.client.create_report(report)
+                        created_new = report_id is not None
+                    if report_id:
+                        if created_new:
+                            metrics["reports_created"] += 1
+                        else:
+                            metrics["reports_matched"] += 1
+                        logger.info(
+                            "report_upserted source=miniflux id=%s title=%s match=%s",
                             report_id,
-                            "miniflux",
-                            source_url,
-                            url_digest or None,
+                            report.title,
+                            match_reason or "created",
                         )
-                    if source_url and entry_id:
-                        should_add_entry_ref = self.state.remember_hash(
-                            "external_ref",
-                            f"{report_id}:entry:{entry_id}",
-                        )
-                        if should_add_entry_ref:
+                        existing_url_owner = self.mapping.get_by_url_hash(url_digest)
+                        store_identity_mappings(self.mapping, report_id, "Report", candidate)
+                        should_add_ref = True
+                        if url_digest:
+                            should_add_ref = self.state.remember_hash(
+                                "external_ref",
+                                f"{report_id}:{url_digest}",
+                            )
+                        if source_url and existing_url_owner is None and should_add_ref:
                             self.client.add_external_reference_to_report(
                                 report_id,
-                                "miniflux_entry",
+                                "miniflux",
                                 source_url,
-                                str(entry_id),
+                                url_digest or None,
                             )
-                    if feed_url:
-                        should_add_feed_ref = self.state.remember_hash(
-                            "external_ref",
-                            f"{report_id}:feed:{feed_id}:{feed_url}",
-                        )
-                        if should_add_feed_ref:
-                            self.client.add_external_reference_to_report(
-                                report_id,
-                                "miniflux_feed",
-                                feed_url,
-                                str(feed_id) if feed_id else None,
+                            metrics["external_refs_added"] += 1
+                        if source_url and entry_id:
+                            should_add_entry_ref = self.state.remember_hash(
+                                "external_ref",
+                                f"{report_id}:entry:{entry_id}",
                             )
-                    if site_url and not feed_url:
-                        should_add_site_ref = self.state.remember_hash(
-                            "external_ref",
-                            f"{report_id}:site:{site_url}",
-                        )
-                        if should_add_site_ref:
-                            self.client.add_external_reference_to_report(
-                                report_id,
-                                "miniflux_site",
-                                site_url,
-                                None,
+                            if should_add_entry_ref:
+                                self.client.add_external_reference_to_report(
+                                    report_id,
+                                    "miniflux_entry",
+                                    source_url,
+                                    str(entry_id),
+                                )
+                                metrics["external_refs_added"] += 1
+                        if feed_url:
+                            should_add_feed_ref = self.state.remember_hash(
+                                "external_ref",
+                                f"{report_id}:feed:{feed_id}:{feed_url}",
                             )
-                    for author_id in author_ids:
-                        self.client.create_relationship(report_id, author_id, "related-to")
-                    if org_id:
-                        self.client.create_relationship(report_id, org_id, "related-to")
-                    if self.store_html_note:
-                        html_note = content_html or summary_html
-                        if html_note:
-                            note_body = f"Miniflux HTML\n\n{html_note}"
-                            self.client.create_note(
-                                note_body,
-                                object_refs=[report_id],
-                                labels=["source:miniflux", "html"],
+                            if should_add_feed_ref:
+                                self.client.add_external_reference_to_report(
+                                    report_id,
+                                    "miniflux_feed",
+                                    feed_url,
+                                    str(feed_id) if feed_id else None,
+                                )
+                                metrics["external_refs_added"] += 1
+                        if site_url and not feed_url:
+                            should_add_site_ref = self.state.remember_hash(
+                                "external_ref",
+                                f"{report_id}:site:{site_url}",
                             )
-                else:
-                    logger.info("report_skipped source=miniflux reason=create_failed title=%s", report.title)
-                if published_dt > max_published_dt or (
-                    published_dt == max_published_dt and entry_id > max_entry_id
-                ):
-                    max_published_dt = published_dt
-                    max_entry_id = entry_id
+                            if should_add_site_ref:
+                                self.client.add_external_reference_to_report(
+                                    report_id,
+                                    "miniflux_site",
+                                    site_url,
+                                    None,
+                                )
+                                metrics["external_refs_added"] += 1
+                        for author_id in author_ids:
+                            self.client.create_relationship(report_id, author_id, "related-to")
+                        if org_id:
+                            self.client.create_relationship(report_id, org_id, "related-to")
+                        if self.store_html_note:
+                            html_note = content_html or summary_html
+                            if html_note:
+                                note_body = f"Miniflux HTML\n\n{html_note}"
+                                self.client.create_note(
+                                    note_body,
+                                    object_refs=[report_id],
+                                    labels=["source:miniflux", "html"],
+                                )
+                                metrics["notes_created"] += 1
+                    else:
+                        metrics["reports_failed"] += 1
+                        logger.info("report_skipped source=miniflux reason=create_failed title=%s", report.title)
+                    if published_dt > max_published_dt or (
+                        published_dt == max_published_dt and entry_id > max_entry_id
+                    ):
+                        max_published_dt = published_dt
+                        max_entry_id = entry_id
 
-            if reached_cutoff:
-                break
-            offset += limit
+                if reached_cutoff:
+                    break
+                offset += limit
 
-        if max_entry_id != last_id or max_published_dt != cutoff_dt:
-            self.state.set("last_entry_id", max_entry_id)
-            self.state.set("last_published_at", max_published_dt.isoformat())
-        logger.info("miniflux_run_completed entries=%s", total_entries)
-        work.done(f"entries={total_entries}")
+            metrics["entries_total"] = total_entries
+            metrics["entries_processed"] = processed_entries
+            metrics["cursor_last_entry_id"] = max_entry_id
+            metrics["cursor_last_published_at"] = max_published_dt.isoformat()
 
+            if max_entry_id != last_id or max_published_dt != cutoff_dt:
+                self.state.set("last_entry_id", max_entry_id)
+                self.state.set("last_published_at", max_published_dt.isoformat())
+            logger.info(
+                "miniflux_run_completed entries=%s created=%s matched=%s failed=%s skipped=%s",
+                total_entries,
+                metrics["reports_created"],
+                metrics["reports_matched"],
+                metrics["reports_failed"],
+                metrics["entries_skipped"],
+            )
+            work.log(
+                f"created={metrics['reports_created']} matched={metrics['reports_matched']} "
+                f"failed={metrics['reports_failed']} skipped={metrics['entries_skipped']}"
+            )
+            work.done(f"entries={total_entries}")
+            run_state.success(**metrics)
+        except Exception as exc:
+            logger.exception("miniflux_run_failed error=%s", exc)
+            run_state.failure(str(exc), **metrics)
+            raise
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):
             self.helper.schedule(self._run, self.interval)

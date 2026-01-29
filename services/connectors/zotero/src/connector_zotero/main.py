@@ -19,6 +19,7 @@ from connectors_common.mapping_store import MappingStore
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
 from connectors_common.enrichment import source_confidence, source_labels
 from connectors_common.state_store import StateStore
+from connectors_common.connector_state import ConnectorState
 from connectors_common.denylist import filter_values
 from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.url_utils import canonicalize_url, normalize_doi, url_hash
@@ -296,14 +297,14 @@ class ZoteroConnector:
         approved_tags: set[str],
         approved_collections: set[str],
         cutoff_dt: datetime | None,
-    ) -> str | None:
+    ) -> tuple[str | None, bool]:
         if cutoff_dt:
             date_value = data.get("dateModified") or data.get("dateAdded") or data.get("date")
             parsed = _parse_zotero_date(date_value)
             if parsed and parsed < cutoff_dt:
-                return None
+                return None, False
         if not self._allowed_item(data, approved_tags, approved_collections):
-            return None
+            return None, False
 
         source_url = canonicalize_url(data.get("url") or "")
         url_digest = url_hash(source_url)
@@ -368,6 +369,7 @@ class ZoteroConnector:
             if duplicate:
                 report_id = duplicate.report_id
                 match_reason = "title_similarity"
+        created_new = False
         if not report_id:
             report = ReportInput(
                 title=title,
@@ -382,6 +384,7 @@ class ZoteroConnector:
                 external_id=url_digest or None,
             )
             report_id = self.client.create_report(report)
+            created_new = report_id is not None
         if report_id:
             logger.info(
                 "report_upserted source=zotero id=%s title=%s match=%s",
@@ -423,12 +426,25 @@ class ZoteroConnector:
                 self.client.create_relationship(report_id, author_id, "related-to")
         else:
             logger.info("report_skipped source=zotero reason=create_failed title=%s", title)
-        return report_id
+        return report_id, created_new
 
     def _run(self) -> None:
+        run_state = ConnectorState(self.helper, "Zotero")
+        run_state.start()
+        metrics = {
+            "items_total": 0,
+            "items_processed": 0,
+            "items_skipped": 0,
+            "reports_created": 0,
+            "reports_matched": 0,
+            "reports_failed": 0,
+            "annotations_processed": 0,
+            "notes_created": 0,
+        }
         try:
             if not self.api_key or not self.library_id:
                 logger.warning("zotero_not_configured")
+                run_state.skipped("not_configured", **metrics)
                 return
             work = WorkTracker(self.helper, "Zotero import")
             since_version = self.state.get("last_version")
@@ -443,15 +459,18 @@ class ZoteroConnector:
             if not approved_tags and not approved_collections:
                 logger.warning("zotero_no_approved_filters")
                 work.done("No approved filters")
+                run_state.skipped("no_approved_filters", **metrics)
                 return
             recent_reports = self.client.list_reports_since(datetime.now(timezone.utc) - timedelta(days=self.dedup_days))
             candidates = prepare_candidates(recent_reports)
             if not self.zotero:
                 logger.warning("zotero_not_configured")
                 work.done("Zotero not configured")
+                run_state.skipped("zotero_not_configured", **metrics)
                 return
             items, last_version, item_pages = fetch_items(self.zotero, since_version)
             total_items = len(items)
+            metrics["items_total"] = total_items
             work.log(f"items={total_items} pages={item_pages}")
             annotations = []
             last_progress = -1
@@ -462,18 +481,35 @@ class ZoteroConnector:
                         work.progress(percent, f"processed_items={idx}/{total_items}")
                         last_progress = percent
                 data = item.get("data", {})
+                metrics["items_processed"] += 1
                 if data.get("itemType") == "annotation":
                     annotations.append(item)
                     continue
                 item_key = item.get("key") or data.get("key")
-                self._upsert_report(data, item_key, candidates, approved_tags, approved_collections, cutoff_dt)
+                report_id, created_new = self._upsert_report(
+                    data,
+                    item_key,
+                    candidates,
+                    approved_tags,
+                    approved_collections,
+                    cutoff_dt,
+                )
+                if report_id:
+                    if created_new:
+                        metrics["reports_created"] += 1
+                    else:
+                        metrics["reports_matched"] += 1
+                else:
+                    metrics["items_skipped"] += 1
             for item in annotations:
                 data = item.get("data", {})
                 parent_key = data.get("parentItem")
                 if not parent_key:
+                    metrics["items_skipped"] += 1
                     continue
                 report_id = self.mapping.get_by_external_id("zotero_item", str(parent_key))
                 if not report_id:
+                    metrics["items_skipped"] += 1
                     continue
                 annotation_text = (data.get("annotationText") or "").strip()
                 annotation_comment = (data.get("annotationComment") or "").strip()
@@ -505,8 +541,10 @@ class ZoteroConnector:
                     labels=["source:zotero"],
                 )
                 if note_id and external_id:
+                    metrics["notes_created"] += 1
                     self.mapping.upsert_external_id("zotero_annot", external_id, note_id, "Note")
                 self._handle_extracted_links(report_id, annotation_text, annotation_comment)
+                metrics["annotations_processed"] += 1
             self._process_fulltext(
                 approved_tags,
                 approved_collections,
@@ -515,10 +553,17 @@ class ZoteroConnector:
             )
             if last_version and last_version != since_version:
                 self.state.set("last_version", last_version)
+                metrics["cursor_last_version"] = str(last_version)
             logger.info("zotero_run_completed items=%s", len(items))
+            work.log(
+                f"created={metrics['reports_created']} matched={metrics['reports_matched']} "
+                f"skipped={metrics['items_skipped']} notes={metrics['notes_created']}"
+            )
             work.done(f"items={len(items)}")
+            run_state.success(**metrics)
         except Exception as exc:
             logger.exception("zotero_run_failed error=%s", exc)
+            run_state.failure(str(exc), **metrics)
             return
 
     def _process_fulltext(
@@ -584,7 +629,7 @@ class ZoteroConnector:
                 if not parent_item:
                     continue
                 parent_data = parent_item.get("data", {})
-                report_id = self._upsert_report(
+                report_id, _ = self._upsert_report(
                     parent_data,
                     parent_key,
                     candidates,

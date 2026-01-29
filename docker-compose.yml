@@ -5,7 +5,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms6g -Xmx6g
+      - ES_JAVA_OPTS=-Xms8g -Xmx8g
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
     healthcheck:
@@ -130,6 +130,8 @@ services:
     depends_on:
       opencti:
         condition: service_healthy
+      briefing:
+        condition: service_healthy
 
   opencti-init:
     build:
@@ -146,6 +148,8 @@ services:
       - OPENCTI_USER_ROLE=${OPENCTI_USER_ROLE:-Analyst}
     depends_on:
       opencti:
+        condition: service_healthy
+      briefing:
         condition: service_healthy
 
   briefing:
@@ -197,7 +201,7 @@ services:
       - CONNECTOR_NAME=miniflux
       - CONNECTOR_SCOPE=miniflux
       - CONNECTOR_LOG_LEVEL=info
-      - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-600}
+      - CONNECTOR_RUN_INTERVAL_SECONDS=${MINIFLUX_RUN_INTERVAL_SECONDS:-1200}
       - MINIFLUX_URL=${MINIFLUX_URL}
       - MINIFLUX_API_KEY=${MINIFLUX_API_KEY}
       - TI_MAPPING_DB=${TI_MAPPING_DB:-/data/mapping/ti-mapping.sqlite}
@@ -207,6 +211,8 @@ services:
     restart: unless-stopped
     depends_on:
       opencti:
+        condition: service_healthy
+      briefing:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
@@ -230,7 +236,7 @@ services:
       - CONNECTOR_NAME=readwise
       - CONNECTOR_SCOPE=readwise
       - CONNECTOR_LOG_LEVEL=info
-      - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-600}
+      - CONNECTOR_RUN_INTERVAL_SECONDS=${READWISE_RUN_INTERVAL_SECONDS:-1800}
       - READWISE_API_KEY=${READWISE_API_KEY}
       - TI_MAPPING_DB=${TI_MAPPING_DB:-/data/mapping/ti-mapping.sqlite}
     volumes:
@@ -239,6 +245,8 @@ services:
     restart: unless-stopped
     depends_on:
       opencti:
+        condition: service_healthy
+      briefing:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
@@ -262,7 +270,7 @@ services:
       - CONNECTOR_NAME=zotero
       - CONNECTOR_SCOPE=zotero
       - CONNECTOR_LOG_LEVEL=info
-      - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-600}
+      - CONNECTOR_RUN_INTERVAL_SECONDS=${ZOTERO_RUN_INTERVAL_SECONDS:-3600}
       - ZOTERO_API_KEY=${ZOTERO_API_KEY}
       - ZOTERO_LIBRARY_ID=${ZOTERO_LIBRARY_ID}
       - ZOTERO_LIBRARY_TYPE=${ZOTERO_LIBRARY_TYPE:-user}
@@ -298,7 +306,7 @@ services:
       - CONNECTOR_NAME=enrich-text
       - CONNECTOR_SCOPE=text-enrichment
       - CONNECTOR_LOG_LEVEL=info
-      - CONNECTOR_RUN_INTERVAL_SECONDS=${CONNECTOR_RUN_INTERVAL_SECONDS:-900}
+      - CONNECTOR_RUN_INTERVAL_SECONDS=${ENRICH_RUN_INTERVAL_SECONDS:-1800}
       - ENRICH_LOOKBACK_DAYS=${ENRICH_LOOKBACK_DAYS:-7}
       - TI_ENRICH_SOURCES=${TI_ENRICH_SOURCES:-miniflux,readwise,zotero}
       - ENRICHMENT_LLM_ENABLED=${ENRICHMENT_LLM_ENABLED:-true}
@@ -381,6 +389,7 @@ services:
       - CONNECTOR_LOG_LEVEL=info
       - CONNECTOR_RUN_INTERVAL=21600
       - CONNECTOR_UPDATE_EXISTING_DATA=true
+      - CISA_CATALOG_URL=${CISA_CATALOG_URL:-https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json}
     restart: unless-stopped
     depends_on:
       opencti:
@@ -599,34 +608,6 @@ services:
       - CONNECTOR_DURATION_PERIOD=PT1H
       - MISP_FEED_SOURCE_TYPE=url
       - MISP_FEED_URL=${MISP_FEED_URL}
-      - MISP_FEED_SSL_VERIFY=true
-      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
-      - MISP_FEED_CREATE_REPORTS=true
-      - MISP_FEED_REPORT_TYPE=misp-event
-      - MISP_FEED_CREATE_INDICATORS=true
-      - MISP_FEED_CREATE_OBSERVABLES=true
-      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
-      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
-    restart: unless-stopped
-    depends_on:
-      opencti:
-        condition: service_healthy
-
-  connector-misp-feed-digitalside:
-    image: opencti/connector-misp-feed:latest
-    env_file:
-      - .env
-    environment:
-      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
-      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - CONNECTOR_ID=${MISP_FEED_DIGITALSIDE_CONNECTOR_ID}
-      - CONNECTOR_TYPE=EXTERNAL_IMPORT
-      - CONNECTOR_NAME=MISP Feed DigitalSide
-      - CONNECTOR_SCOPE=misp-feed
-      - CONNECTOR_LOG_LEVEL=info
-      - CONNECTOR_DURATION_PERIOD=PT1H
-      - MISP_FEED_SOURCE_TYPE=url
-      - MISP_FEED_URL=${MISP_FEED_DIGITALSIDE_URL}
       - MISP_FEED_SSL_VERIFY=true
       - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
       - MISP_FEED_CREATE_REPORTS=true

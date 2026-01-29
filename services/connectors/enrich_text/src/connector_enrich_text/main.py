@@ -18,6 +18,7 @@ from connectors_common.extractors import (
 from connectors_common.llm import extract_entities, summarize_text
 from connectors_common.opencti_client import OpenCTIClient
 from connectors_common.state_store import StateStore
+from connectors_common.connector_state import ConnectorState
 from connectors_common.work import WorkTracker
 
 logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
@@ -323,57 +324,78 @@ class EnrichTextConnector:
             )
 
     def _run(self) -> None:
-        last_run = self.state.get("last_run")
-        if last_run:
-            since = isoparse(last_run)
-        else:
-            since = datetime.now(timezone.utc) - timedelta(days=self.lookback_days)
+        run_state = ConnectorState(self.helper, "Enrich Text")
+        run_state.start()
+        metrics = {
+            "reports_total": 0,
+            "notes_total": 0,
+            "items_processed": 0,
+            "items_skipped": 0,
+        }
+        try:
+            last_run = self.state.get("last_run")
+            if last_run:
+                since = isoparse(last_run)
+            else:
+                since = datetime.now(timezone.utc) - timedelta(days=self.lookback_days)
 
-        work = WorkTracker(self.helper, "Enrich Text")
-        reports = self.client.list_reports_since(since)
-        notes = self.client.list_notes_since(since)
-        total_items = len(reports) + len(notes)
-        work.log(f"reports={len(reports)} notes={len(notes)}")
-        processed = 0
-        last_progress = -1
-        for report in reports:
-            report_id = report.get("id")
-            if not report_id:
-                continue
-            labels = _collect_labels(report)
-            if self.allowed_sources and not self._should_enrich(labels):
-                continue
-            text = report.get("description") or ""
-            self._enrich_text(report_id, text, "report")
-            processed += 1
-            if total_items:
-                percent = int((processed / total_items) * 100)
-                if percent >= last_progress + 5:
-                    work.progress(percent, f"processed={processed}/{total_items}")
-                    last_progress = percent
+            work = WorkTracker(self.helper, "Enrich Text")
+            reports = self.client.list_reports_since(since)
+            notes = self.client.list_notes_since(since)
+            total_items = len(reports) + len(notes)
+            metrics["reports_total"] = len(reports)
+            metrics["notes_total"] = len(notes)
+            work.log(f"reports={len(reports)} notes={len(notes)}")
+            processed = 0
+            last_progress = -1
+            for report in reports:
+                report_id = report.get("id")
+                if not report_id:
+                    metrics["items_skipped"] += 1
+                    continue
+                labels = _collect_labels(report)
+                if self.allowed_sources and not self._should_enrich(labels):
+                    metrics["items_skipped"] += 1
+                    continue
+                text = report.get("description") or ""
+                self._enrich_text(report_id, text, "report")
+                processed += 1
+                if total_items:
+                    percent = int((processed / total_items) * 100)
+                    if percent >= last_progress + 5:
+                        work.progress(percent, f"processed={processed}/{total_items}")
+                        last_progress = percent
 
-        for note in notes:
-            note_id = note.get("id")
-            if not note_id:
-                continue
-            labels = _collect_labels(note)
-            if self.allowed_sources and not self._should_enrich(labels):
-                continue
-            text = note.get("content") or ""
-            self._enrich_text(note_id, text, "note")
-            for ref_id in _collect_object_refs(note):
-                self._enrich_text(ref_id, text, "note-ref")
-            processed += 1
-            if total_items:
-                percent = int((processed / total_items) * 100)
-                if percent >= last_progress + 5:
-                    work.progress(percent, f"processed={processed}/{total_items}")
-                    last_progress = percent
+            for note in notes:
+                note_id = note.get("id")
+                if not note_id:
+                    metrics["items_skipped"] += 1
+                    continue
+                labels = _collect_labels(note)
+                if self.allowed_sources and not self._should_enrich(labels):
+                    metrics["items_skipped"] += 1
+                    continue
+                text = note.get("content") or ""
+                self._enrich_text(note_id, text, "note")
+                for ref_id in _collect_object_refs(note):
+                    self._enrich_text(ref_id, text, "note-ref")
+                processed += 1
+                if total_items:
+                    percent = int((processed / total_items) * 100)
+                    if percent >= last_progress + 5:
+                        work.progress(percent, f"processed={processed}/{total_items}")
+                        last_progress = percent
 
-        self.state.set("last_run", datetime.now(timezone.utc).isoformat())
-        logger.info("enrich_run_completed reports=%s notes=%s", len(reports), len(notes))
-        work.done(f"processed={processed}")
-
+            self.state.set("last_run", datetime.now(timezone.utc).isoformat())
+            logger.info("enrich_run_completed reports=%s notes=%s", len(reports), len(notes))
+            work.log(f"processed={processed} skipped={metrics['items_skipped']}")
+            work.done(f"processed={processed}")
+            metrics["items_processed"] = processed
+            run_state.success(**metrics)
+        except Exception as exc:
+            logger.exception("enrich_run_failed error=%s", exc)
+            run_state.failure(str(exc), **metrics)
+            raise
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):
             self.helper.schedule(self._run, self.interval)

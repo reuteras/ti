@@ -193,7 +193,7 @@ def _existing_service_account(url: str, token: str, name: str) -> bool:
     query = """
     query Users($search: String) {
       users(search: $search, first: 5) {
-        edges { node { name } }
+        edges { node { name user_email } }
       }
     }
     """
@@ -204,7 +204,7 @@ def _existing_service_account(url: str, token: str, name: str) -> bool:
     edges = data.get("users", {}).get("edges", [])
     for edge in edges:
         node = edge.get("node", {})
-        if node.get("name") == name:
+        if node.get("name") == name or node.get("user_email") == name:
             return True
     return False
 
@@ -250,6 +250,12 @@ def _create_user_without_introspection(
             logger.info("user_created email=%s", email)
             return True
         except Exception as exc:
+            if "already exists" in str(exc).lower():
+                logger.info("user_exists email=%s", email)
+                return True
+            if _is_schema_error(exc):
+                logger.debug("user_create_api_not_supported")
+                continue
             if "Field \"user_email\" is not defined" in str(exc):
                 payload["email"] = payload.pop("user_email")
                 continue
@@ -299,6 +305,12 @@ def _create_user(url: str, token: str, name: str, email: str, password: str, rol
             logger.info("user_created email=%s", email)
             return True
         except Exception as exc:
+            if "already exists" in str(exc).lower():
+                logger.info("user_exists email=%s", email)
+                return True
+            if _is_schema_error(exc):
+                logger.debug("user_create_api_not_supported")
+                continue
             logger.warning("user_create_failed email=%s error=%s", email, exc)
             return False
     return False

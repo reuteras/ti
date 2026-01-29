@@ -16,6 +16,7 @@ from dateutil import parser as date_parser
 from pycti import OpenCTIConnectorHelper
 
 from connectors_common.state_store import StateStore
+from connectors_common.connector_state import ConnectorState
 from connectors_common.work import WorkTracker
 
 logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
@@ -195,6 +196,22 @@ def _cvss_score_to_opencti(score: Any) -> int | None:
         value = value * 10
     value = max(0, min(100, round(value)))
     return int(value)
+
+
+def _is_cvss4_vector_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "valid CVSS4 vector" in message or "CVSS4" in message
+
+
+def _strip_cvss4_fields(fields: dict[str, Any]) -> bool:
+    removed = False
+    for key in list(fields.keys()):
+        if key.startswith("x_opencti_cvss_v4_"):
+            fields.pop(key, None)
+            removed = True
+    if removed:
+        fields.pop("x_opencti_score", None)
+    return removed
 
 
 def _normalize_opencti_date(value: str) -> str | None:
@@ -444,7 +461,13 @@ class OpenCTIClient:
                 if value is None:
                     continue
                 input_payload[key] = value
-        data = self._post(mutation, {"input": input_payload})
+        try:
+            data = self._post(mutation, {"input": input_payload})
+        except Exception as exc:
+            if _is_cvss4_vector_error(exc) and _strip_cvss4_fields(input_payload):
+                data = self._post(mutation, {"input": input_payload})
+            else:
+                raise
         return data.get("vulnerabilityAdd", {}).get("id")
 
     def create_software(self, name: str) -> str | None:
@@ -452,44 +475,20 @@ class OpenCTIClient:
             return None
         if not self._software_checked:
             self._software_checked = True
-            if not self._supports_mutation("softwareAdd"):
-                self._software_supported = False
-                return None
         mutation = """
-        mutation SoftwareAdd($input: SoftwareAddInput!) {
-          softwareAdd(input: $input) { id }
+        mutation SoftwareAdd($type: String!, $Software: SoftwareAddInput) {
+          stixCyberObservableAdd(type: $type, Software: $Software) { id }
         }
         """
         try:
-            data = self._post(mutation, {"input": {"name": name}})
+            data = self._post(mutation, {"type": "Software", "Software": {"name": name}})
         except Exception as exc:
-            if "softwareAdd" in str(exc) or "GRAPHQL_VALIDATION_FAILED" in str(exc):
+            if "softwareAdd" in str(exc) or "stixCyberObservableAdd" in str(exc) or "GRAPHQL_VALIDATION_FAILED" in str(exc):
                 self._software_supported = False
                 logger.warning("cvelist_software_disabled")
                 return None
             raise
-        return data.get("softwareAdd", {}).get("id")
-
-    def _supports_mutation(self, mutation_name: str) -> bool:
-        query = """
-        query MutationSupport {
-          __schema {
-            mutationType {
-              fields { name }
-            }
-          }
-        }
-        """
-        try:
-            data = self._post(query, {})
-        except Exception as exc:
-            logger.warning("cvelist_schema_query_failed error=%s", exc)
-            return False
-        fields = data.get("__schema", {}).get("mutationType", {}).get("fields", [])
-        for field in fields:
-            if field.get("name") == mutation_name:
-                return True
-        return False
+        return data.get("stixCyberObservableAdd", {}).get("id")
 
     def update_description(self, vuln_id: str, description: str) -> None:
         mutation = """
@@ -512,21 +511,33 @@ class OpenCTIClient:
           }
         }
         """
-        inputs: list[dict[str, Any]] = []
-        for key, value in fields.items():
-            if value is None:
-                continue
-            if isinstance(value, list):
-                values = [str(item) for item in value if str(item).strip()]
-                if not values:
+        def _build_inputs(payload: dict[str, Any]) -> list[dict[str, Any]]:
+            inputs: list[dict[str, Any]] = []
+            for key, value in payload.items():
+                if value is None:
                     continue
-                inputs.append({"key": key, "value": values})
-            else:
-                values = [str(value)]
-                inputs.append({"key": key, "value": values})
+                if isinstance(value, list):
+                    values = [str(item) for item in value if str(item).strip()]
+                    if not values:
+                        continue
+                    inputs.append({"key": key, "value": values})
+                else:
+                    values = [str(value)]
+                    inputs.append({"key": key, "value": values})
+            return inputs
+
+        inputs = _build_inputs(fields)
         if not inputs:
             return
-        self._post(mutation, {"id": vuln_id, "input": inputs})
+        try:
+            self._post(mutation, {"id": vuln_id, "input": inputs})
+        except Exception as exc:
+            if _is_cvss4_vector_error(exc) and _strip_cvss4_fields(fields):
+                retry_inputs = _build_inputs(fields)
+                if retry_inputs:
+                    self._post(mutation, {"id": vuln_id, "input": retry_inputs})
+            else:
+                raise
 
     def add_external_reference(self, vuln_id: str, source_name: str, url: str) -> None:
         if not self._external_refs_supported:
@@ -758,11 +769,19 @@ class CveListConnector:
         self.epss_path = Path("/data/epss/epss_scores-current.csv.gz")
 
     def _run(self) -> None:
+        run_state = ConnectorState(self.helper, "CVE List V5")
+        run_state.start()
+        metrics = {
+            "files_total": 0,
+            "files_processed": 0,
+            "epss_refreshed": 0,
+        }
         work = WorkTracker(self.helper, "CVE List V5 import")
         try:
             refreshed = _ensure_epss_file(self.epss_path, self.epss_url, self.epss_refresh_seconds)
             if refreshed:
                 logger.info("cvelist_epss_refreshed")
+                metrics["epss_refreshed"] = 1
             epss_scores = _load_epss_scores(self.epss_path)
             _ensure_repo(self.repo_url, self.branch, self.repo_path)
             head = _get_head_commit(self.repo_path)
@@ -770,6 +789,8 @@ class CveListConnector:
             if last_commit == head:
                 logger.info("cvelist_no_changes")
                 work.done("No changes")
+                metrics["cursor_last_commit"] = head
+                run_state.skipped("no_changes", **metrics)
                 return
             changed = None
             if last_commit:
@@ -778,8 +799,11 @@ class CveListConnector:
                     logger.info("cvelist_no_changed_files")
                     self.state.set("last_commit", head)
                     work.done("No changed files")
+                    metrics["cursor_last_commit"] = head
+                    run_state.skipped("no_changed_files", **metrics)
                     return
             total_files = len(changed) if changed is not None else 0
+            metrics["files_total"] = total_files
             if total_files:
                 work.log(f"files={total_files}")
             count = 0
@@ -796,10 +820,14 @@ class CveListConnector:
                     work.progress(None, f"processed_files={count}")
             logger.info("cvelist_run_complete count=%s", count)
             self.state.set("last_commit", head)
+            metrics["cursor_last_commit"] = head
             work.done(f"files={count}")
+            metrics["files_processed"] = count
+            run_state.success(**metrics)
         except Exception as exc:
             logger.warning("cvelist_run_failed error=%s", exc)
             work.done("Run failed")
+            run_state.failure(str(exc), **metrics)
 
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):

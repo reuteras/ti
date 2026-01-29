@@ -12,6 +12,7 @@ from pycti import OpenCTIConnectorHelper
 from connectors_common.mapping_store import MappingStore
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
 from connectors_common.state_store import StateStore
+from connectors_common.connector_state import ConnectorState
 from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.work import WorkTracker
 
@@ -269,12 +270,22 @@ class AwesomeAnnualConnector:
         state_map[pdf_path] = pdf_sha
 
     def _run(self) -> None:
+        run_state = ConnectorState(self.helper, "Awesome Annual Security Reports")
+        run_state.start()
+        metrics = {
+            "pdfs_total": 0,
+            "markdowns_total": 0,
+            "pdfs_processed": 0,
+        }
         work = WorkTracker(self.helper, "Awesome Annual Security Reports")
         try:
             pdfs, mds = self._list_repo_files()
         except Exception as exc:
             logger.warning("awesome_annual_list_failed error=%s", exc)
+            run_state.failure(str(exc), **metrics)
             return
+        metrics["pdfs_total"] = len(pdfs)
+        metrics["markdowns_total"] = len(mds)
         work.log(f"pdfs={len(pdfs)} markdowns={len(mds)}")
 
         raw_state = self.state.get("pdf_sha_map", {})
@@ -293,6 +304,8 @@ class AwesomeAnnualConnector:
         self.state.set("last_run", datetime.now(timezone.utc).isoformat())
         logger.info("awesome_annual_run_completed processed=%s", updated)
         work.done(f"processed={updated}")
+        metrics["pdfs_processed"] = updated
+        run_state.success(**metrics)
 
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):
