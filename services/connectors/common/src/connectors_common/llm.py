@@ -11,7 +11,9 @@ def summarize_text(text: str) -> str | None:
     enabled = os.getenv("ENRICHMENT_LLM_ENABLED", "false").lower() == "true"
     if not enabled:
         return None
-    endpoint = os.getenv("ENRICHMENT_LLM_ENDPOINT", "http://host.docker.internal:11434/api/generate")
+    endpoint = os.getenv(
+        "ENRICHMENT_LLM_ENDPOINT", "http://host.docker.internal:11434/api/generate"
+    )
     model = os.getenv("ENRICHMENT_LLM_MODEL", "llama3.2:3b")
     prompt = textwrap.dedent(
         f"""
@@ -46,7 +48,9 @@ def extract_entities(text: str, max_chars: int = 4000) -> dict[str, list[str]]:
         return {"persons": [], "organizations": [], "products": [], "countries": []}
     if len(value) > max_chars:
         value = value[:max_chars]
-    endpoint = os.getenv("ENRICHMENT_LLM_ENDPOINT", "http://host.docker.internal:11434/api/generate")
+    endpoint = os.getenv(
+        "ENRICHMENT_LLM_ENDPOINT", "http://host.docker.internal:11434/api/generate"
+    )
     model = os.getenv("ENRICHMENT_LLM_MODEL", "llama3.2:3b")
     prompt = textwrap.dedent(
         f"""

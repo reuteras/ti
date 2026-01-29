@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 import secrets
 import sys
 from pathlib import Path
@@ -83,7 +82,9 @@ def main() -> int:
                 env_lines.append(f"{key}={existing[key]}")
                 continue
             if key == "OPENCTI_ADMIN_TOKEN":
-                token = existing.get("OPENCTI_APP__ADMIN__TOKEN") or generated.get("OPENCTI_APP__ADMIN__TOKEN")
+                token = existing.get("OPENCTI_APP__ADMIN__TOKEN") or generated.get(
+                    "OPENCTI_APP__ADMIN__TOKEN"
+                )
                 if token:
                     value = token
                 else:

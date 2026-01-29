@@ -1,13 +1,13 @@
-import json
 import logging
 import os
-import time
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
-logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s"
+)
 logger = logging.getLogger(__name__)
 FALLBACK_TOKEN = ""
 
@@ -38,7 +38,9 @@ def _is_schema_error(exc: Exception) -> bool:
     return "Unknown type" in msg or "Cannot query field" in msg
 
 
-def _post(url: str, token: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+def _post(
+    url: str, token: str, query: str, variables: dict[str, Any]
+) -> dict[str, Any]:
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -119,7 +121,11 @@ def _create_service_account_without_introspection(
         ("userServiceAccountAdd", "UserServiceAccountAddInput"),
         ("userServiceAccountCreate", "UserServiceAccountCreateInput"),
     ]
-    payload = {"name": name, "description": f"Service account for {name}", "token": api_token}
+    payload = {
+        "name": name,
+        "description": f"Service account for {name}",
+        "token": api_token,
+    }
     for mutation_name, input_type in candidates:
         query = f"""
         mutation Create($input: {input_type}!) {{
@@ -150,7 +156,9 @@ def _create_service_account(url: str, token: str, name: str, api_token: str) -> 
     except Exception as exc:
         msg = str(exc)
         if "introspection" in msg.lower():
-            return _create_service_account_without_introspection(url, token, name, api_token)
+            return _create_service_account_without_introspection(
+                url, token, name, api_token
+            )
         raise
     mutation_map = {m.name: m for m in mutations}
 
@@ -256,21 +264,25 @@ def _create_user_without_introspection(
             if _is_schema_error(exc):
                 logger.debug("user_create_api_not_supported")
                 continue
-            if "Field \"user_email\" is not defined" in str(exc):
+            if 'Field "user_email" is not defined' in str(exc):
                 payload["email"] = payload.pop("user_email")
                 continue
             logger.warning("user_create_failed email=%s error=%s", email, exc)
     return False
 
 
-def _create_user(url: str, token: str, name: str, email: str, password: str, role_id: str | None) -> bool:
+def _create_user(
+    url: str, token: str, name: str, email: str, password: str, role_id: str | None
+) -> bool:
     candidates = ["userAdd", "userCreate"]
     try:
         mutations = _get_mutations(url, token)
     except Exception as exc:
         msg = str(exc)
         if "introspection" in msg.lower():
-            return _create_user_without_introspection(url, token, name, email, password, role_id)
+            return _create_user_without_introspection(
+                url, token, name, email, password, role_id
+            )
         raise
     mutation_map = {m.name: m for m in mutations}
     for candidate in candidates:
@@ -353,7 +365,9 @@ def main() -> None:
         else:
             roles = _get_roles(url, admin_token)
             role_id = _find_role_id(roles, user_role)
-            _create_user(url, admin_token, user_name, user_email, user_password, role_id)
+            _create_user(
+                url, admin_token, user_name, user_email, user_password, role_id
+            )
 
 
 if __name__ == "__main__":

@@ -74,7 +74,9 @@ def similarity(a: set[str], b: set[str]) -> float:
     return overlap / union if union else 0.0
 
 
-def find_best_match(title: str, candidates: list[ReportCandidate], threshold: float) -> ReportCandidate | None:
+def find_best_match(
+    title: str, candidates: list[ReportCandidate], threshold: float
+) -> ReportCandidate | None:
     tokens = _tokenize(title)
     best = None
     best_score = 0.0

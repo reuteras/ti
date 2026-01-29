@@ -34,12 +34,16 @@ def _is_auth_required(exc: Exception) -> bool:
 
 
 class OpenCTIClient:
-    def __init__(self, base_url: str, admin_token: str, fallback_token: str | None = None) -> None:
+    def __init__(
+        self, base_url: str, admin_token: str, fallback_token: str | None = None
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.admin_token = admin_token
         self.fallback_token = fallback_token or ""
 
-    def _post_with_token(self, token: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+    def _post_with_token(
+        self, token: str, query: str, variables: dict[str, Any]
+    ) -> dict[str, Any]:
         url = f"{self.base_url}/graphql"
         headers = {"Content-Type": "application/json"}
         if token:
@@ -57,7 +61,11 @@ class OpenCTIClient:
         try:
             return self._post_with_token(self.admin_token, query, variables)
         except Exception as exc:
-            if self.fallback_token and self.fallback_token != self.admin_token and _is_auth_required(exc):
+            if (
+                self.fallback_token
+                and self.fallback_token != self.admin_token
+                and _is_auth_required(exc)
+            ):
                 return self._post_with_token(self.fallback_token, query, variables)
             raise
 

@@ -24,7 +24,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VALIDATE_BIOME_FORMAT: false
+          VALIDATE_HTML_PRETTIER: false
           VALIDATE_JSON_PRETTIER: false
+          VALIDATE_JSCPD: false
           VALIDATE_MARKDOWN_PRETTIER: false
           VALIDATE_NATURAL_LANGUAGE: false
           VALIDATE_PYTHON_BLACK: false

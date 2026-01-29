@@ -66,7 +66,9 @@ def refresh_feeds(storage: Storage) -> int:
         feed_id = int(feed.get("id") or 0)
         if not feed_id:
             continue
-        category_id = int(feed.get("category", {}).get("id") or feed.get("category_id") or 0)
+        category_id = int(
+            feed.get("category", {}).get("id") or feed.get("category_id") or 0
+        )
         category_title = ""
         if category_id and category_id in categories:
             category_title = categories[category_id].title

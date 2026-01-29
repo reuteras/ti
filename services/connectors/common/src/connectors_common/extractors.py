@@ -2,7 +2,9 @@ import re
 from typing import Iterable
 
 CVE_PATTERN = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
-IPV4_PATTERN = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")
+IPV4_PATTERN = re.compile(
+    r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
+)
 DOMAIN_PATTERN = re.compile(r"\b([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b")
 URL_PATTERN = re.compile(r"https?://[^\s)\]]+")
 SHA256_PATTERN = re.compile(r"\b[a-fA-F0-9]{64}\b")
@@ -12,7 +14,9 @@ ASN_PATTERN = re.compile(r"\bAS\d{1,10}\b", re.IGNORECASE)
 ATTACK_PATTERN = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.IGNORECASE)
 YARA_RULE_PATTERN = re.compile(r"(?is)\brule\s+[A-Za-z0-9_:-]+\s*\{.*?\}")
 SIGMA_BLOCK_SPLIT = re.compile(r"(?m)^\s*---\s*$")
-SNORT_RULE_PATTERN = re.compile(r"(?m)^\s*(alert|drop|reject|pass)\s+\S+\s+\S+\s+\S+\s*\(.*\)\s*$")
+SNORT_RULE_PATTERN = re.compile(
+    r"(?m)^\s*(alert|drop|reject|pass)\s+\S+\s+\S+\s+\S+\s*\(.*\)\s*$"
+)
 
 _COUNTRY_ALIASES = {
     "u.s.": "United States",
@@ -223,13 +227,19 @@ _COUNTRY_NAMES = [
     "Hong Kong",
 ]
 
-_COUNTRY_TERMS = sorted({name.lower() for name in _COUNTRY_NAMES} | set(_COUNTRY_ALIASES.keys()), key=len, reverse=True)
-COUNTRY_PATTERN = re.compile(r"\b(" + "|".join(re.escape(term) for term in _COUNTRY_TERMS) + r")\b", re.IGNORECASE)
+_COUNTRY_TERMS = sorted(
+    {name.lower() for name in _COUNTRY_NAMES} | set(_COUNTRY_ALIASES.keys()),
+    key=len,
+    reverse=True,
+)
+COUNTRY_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(term) for term in _COUNTRY_TERMS) + r")\b",
+    re.IGNORECASE,
+)
 
 _ORG_SUFFIX_PATTERN = re.compile(
     r"\b([A-Z][A-Za-z0-9&.\-]*(?:\s+[A-Z][A-Za-z0-9&.\-]*)*\s+(?:Limited|Ltd|Inc|Corp|Corporation|Company|LLC|GmbH|AG|BV|AB|PLC|SAS|SA))\b"
 )
-
 
 
 def extract_cves(text: str) -> list[str]:
@@ -263,7 +273,9 @@ def extract_countries(text: str) -> list[str]:
     return sorted(matches)
 
 
-def extract_organizations(text: str, keywords: Iterable[str] | None = None) -> list[str]:
+def extract_organizations(
+    text: str, keywords: Iterable[str] | None = None
+) -> list[str]:
     matches: set[str] = set()
     text_value = text or ""
     for match in _ORG_SUFFIX_PATTERN.findall(text_value):
@@ -420,7 +432,9 @@ def extract_attack_patterns(text: str) -> list[str]:
     return sorted(matches)
 
 
-def extract_yara_rules(text: str, max_chars: int = 200000, max_rules: int = 10) -> list[str]:
+def extract_yara_rules(
+    text: str, max_chars: int = 200000, max_rules: int = 10
+) -> list[str]:
     value = (text or "")[:max_chars]
     rules: list[str] = []
     for match in YARA_RULE_PATTERN.finditer(value):
@@ -432,7 +446,9 @@ def extract_yara_rules(text: str, max_chars: int = 200000, max_rules: int = 10) 
     return rules
 
 
-def extract_sigma_rules(text: str, max_chars: int = 200000, max_rules: int = 10) -> list[str]:
+def extract_sigma_rules(
+    text: str, max_chars: int = 200000, max_rules: int = 10
+) -> list[str]:
     value = (text or "")[:max_chars]
     blocks = SIGMA_BLOCK_SPLIT.split(value)
     results: list[str] = []
@@ -448,7 +464,9 @@ def extract_sigma_rules(text: str, max_chars: int = 200000, max_rules: int = 10)
     return results
 
 
-def extract_snort_rules(text: str, max_chars: int = 200000, max_rules: int = 20) -> list[str]:
+def extract_snort_rules(
+    text: str, max_chars: int = 200000, max_rules: int = 20
+) -> list[str]:
     value = (text or "")[:max_chars]
     rules = [match.group(0).strip() for match in SNORT_RULE_PATTERN.finditer(value)]
     return rules[:max_rules]

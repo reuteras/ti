@@ -19,14 +19,19 @@ from connectors_common.state_store import StateStore
 from connectors_common.connector_state import ConnectorState
 from connectors_common.work import WorkTracker
 
-logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s"
+)
 logger = logging.getLogger("connector_cvelist")
 
 EPSS_DEFAULT_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
 EPSS_DEFAULT_REFRESH_SECONDS = 24 * 60 * 60
 
+
 def _select_opencti_token() -> str:
-    return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+    return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv(
+        "OPENCTI_ADMIN_TOKEN", ""
+    )
 
 
 def _run_git(args: list[str], repo_path: Path | None = None) -> str:
@@ -42,7 +47,9 @@ def _run_git(args: list[str], repo_path: Path | None = None) -> str:
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "git command failed")
+        raise RuntimeError(
+            result.stderr.strip() or result.stdout.strip() or "git command failed"
+        )
     return result.stdout.strip()
 
 
@@ -61,7 +68,9 @@ def _get_head_commit(repo_path: Path) -> str:
 
 def _changed_files(repo_path: Path, previous: str, current: str) -> list[str]:
     try:
-        diff = _run_git(["diff", "--name-only", previous, current, "--", "cves"], repo_path)
+        diff = _run_git(
+            ["diff", "--name-only", previous, current, "--", "cves"], repo_path
+        )
     except Exception as exc:
         logger.warning("cvelist_diff_failed error=%s", exc)
         return []
@@ -247,15 +256,25 @@ def _extract_cvss(containers: Iterable[dict[str, Any]]) -> dict[str, Any]:
                         "x_opencti_cvss_vector_string": cvss.get("vectorString"),
                         "x_opencti_cvss_base_score": cvss.get("baseScore"),
                         "x_opencti_cvss_base_severity": cvss.get("baseSeverity"),
-                        "x_opencti_score": _cvss_score_to_opencti(cvss.get("baseScore")),
+                        "x_opencti_score": _cvss_score_to_opencti(
+                            cvss.get("baseScore")
+                        ),
                         "x_opencti_cvss_attack_vector": cvss.get("attackVector"),
-                        "x_opencti_cvss_attack_complexity": cvss.get("attackComplexity"),
-                        "x_opencti_cvss_privileges_required": cvss.get("privilegesRequired"),
+                        "x_opencti_cvss_attack_complexity": cvss.get(
+                            "attackComplexity"
+                        ),
+                        "x_opencti_cvss_privileges_required": cvss.get(
+                            "privilegesRequired"
+                        ),
                         "x_opencti_cvss_user_interaction": cvss.get("userInteraction"),
                         "x_opencti_cvss_scope": cvss.get("scope"),
-                        "x_opencti_cvss_confidentiality_impact": cvss.get("confidentialityImpact"),
+                        "x_opencti_cvss_confidentiality_impact": cvss.get(
+                            "confidentialityImpact"
+                        ),
                         "x_opencti_cvss_integrity_impact": cvss.get("integrityImpact"),
-                        "x_opencti_cvss_availability_impact": cvss.get("availabilityImpact"),
+                        "x_opencti_cvss_availability_impact": cvss.get(
+                            "availabilityImpact"
+                        ),
                     }
             cvss4 = metric.get("cvssV4_0")
             if isinstance(cvss4, dict):
@@ -271,12 +290,21 @@ def _extract_cvss(containers: Iterable[dict[str, Any]]) -> dict[str, Any]:
                     ("attackRequirements", "x_opencti_cvss_v4_attack_requirements"),
                     ("privilegesRequired", "x_opencti_cvss_v4_privileges_required"),
                     ("userInteraction", "x_opencti_cvss_v4_user_interaction"),
-                    ("confidentialityImpact", "x_opencti_cvss_v4_confidentiality_impact_v"),
+                    (
+                        "confidentialityImpact",
+                        "x_opencti_cvss_v4_confidentiality_impact_v",
+                    ),
                     ("integrityImpact", "x_opencti_cvss_v4_integrity_impact_v"),
                     ("availabilityImpact", "x_opencti_cvss_v4_availability_impact_v"),
-                    ("subConfidentialityImpact", "x_opencti_cvss_v4_confidentiality_impact_s"),
+                    (
+                        "subConfidentialityImpact",
+                        "x_opencti_cvss_v4_confidentiality_impact_s",
+                    ),
                     ("subIntegrityImpact", "x_opencti_cvss_v4_integrity_impact_s"),
-                    ("subAvailabilityImpact", "x_opencti_cvss_v4_availability_impact_s"),
+                    (
+                        "subAvailabilityImpact",
+                        "x_opencti_cvss_v4_availability_impact_s",
+                    ),
                     ("exploitMaturity", "x_opencti_cvss_v4_exploit_maturity"),
                 ):
                     value = cvss4.get(key)
@@ -289,11 +317,15 @@ def _extract_cvss(containers: Iterable[dict[str, Any]]) -> dict[str, Any]:
 def _extract_cwe(containers: Iterable[dict[str, Any]]) -> list[str]:
     cwes: set[str] = set()
     for container in containers:
-        problem_types = container.get("problemTypes") if isinstance(container, dict) else None
+        problem_types = (
+            container.get("problemTypes") if isinstance(container, dict) else None
+        )
         if not isinstance(problem_types, list):
             continue
         for problem in problem_types:
-            descriptions = problem.get("descriptions") if isinstance(problem, dict) else None
+            descriptions = (
+                problem.get("descriptions") if isinstance(problem, dict) else None
+            )
             if not isinstance(descriptions, list):
                 continue
             for desc in descriptions:
@@ -305,7 +337,9 @@ def _extract_cwe(containers: Iterable[dict[str, Any]]) -> list[str]:
     return sorted(cwes)
 
 
-def _extract_cve(payload: dict[str, Any], epss_scores: dict[str, dict[str, float]]) -> Optional[CveExtract]:
+def _extract_cve(
+    payload: dict[str, Any], epss_scores: dict[str, dict[str, float]]
+) -> Optional[CveExtract]:
     if not isinstance(payload, dict):
         return None
     meta = payload.get("cveMetadata", {})
@@ -317,15 +351,21 @@ def _extract_cve(payload: dict[str, Any], epss_scores: dict[str, dict[str, float
     containers = payload.get("containers", {})
     container_items: list[dict[str, Any]] = []
     if isinstance(containers, dict):
-        container_items = [item for item in containers.values() if isinstance(item, dict)]
+        container_items = [
+            item for item in containers.values() if isinstance(item, dict)
+        ]
     elif isinstance(containers, list):
         container_items = [item for item in containers if isinstance(item, dict)]
     for container in container_items:
-        for item in container.get("descriptions", []) if isinstance(container, dict) else []:
+        for item in (
+            container.get("descriptions", []) if isinstance(container, dict) else []
+        ):
             if item.get("lang", "").lower() == "en":
                 description = item.get("value")
                 break
-        for ref in container.get("references", []) if isinstance(container, dict) else []:
+        for ref in (
+            container.get("references", []) if isinstance(container, dict) else []
+        ):
             url = ref.get("url")
             if isinstance(url, str) and url.strip():
                 references.append(url.strip())
@@ -333,7 +373,9 @@ def _extract_cve(payload: dict[str, Any], epss_scores: dict[str, dict[str, float
             break
     if not description:
         for container in container_items:
-            for item in container.get("descriptions", []) if isinstance(container, dict) else []:
+            for item in (
+                container.get("descriptions", []) if isinstance(container, dict) else []
+            ):
                 value = item.get("value")
                 if isinstance(value, str) and value.strip():
                     description = value.strip()
@@ -389,8 +431,15 @@ class OpenCTIClient:
         self.client.close()
 
     def _post(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.token}"}
-        response = self.client.post(f"{self.base_url}/graphql", json={"query": query, "variables": variables}, headers=headers)
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.token}",
+        }
+        response = self.client.post(
+            f"{self.base_url}/graphql",
+            json={"query": query, "variables": variables},
+            headers=headers,
+        )
         response.raise_for_status()
         payload = response.json()
         if "errors" in payload:
@@ -447,7 +496,9 @@ class OpenCTIClient:
             return edges[0].get("node", {}).get("id")
         return None
 
-    def create_vulnerability(self, name: str, description: str | None, fields: dict[str, Any] | None = None) -> str | None:
+    def create_vulnerability(
+        self, name: str, description: str | None, fields: dict[str, Any] | None = None
+    ) -> str | None:
         mutation = """
         mutation VulnerabilityAdd($input: VulnerabilityAddInput!) {
           vulnerabilityAdd(input: $input) { id }
@@ -481,9 +532,15 @@ class OpenCTIClient:
         }
         """
         try:
-            data = self._post(mutation, {"type": "Software", "Software": {"name": name}})
+            data = self._post(
+                mutation, {"type": "Software", "Software": {"name": name}}
+            )
         except Exception as exc:
-            if "softwareAdd" in str(exc) or "stixCyberObservableAdd" in str(exc) or "GRAPHQL_VALIDATION_FAILED" in str(exc):
+            if (
+                "softwareAdd" in str(exc)
+                or "stixCyberObservableAdd" in str(exc)
+                or "GRAPHQL_VALIDATION_FAILED" in str(exc)
+            ):
                 self._software_supported = False
                 logger.warning("cvelist_software_disabled")
                 return None
@@ -511,6 +568,7 @@ class OpenCTIClient:
           }
         }
         """
+
         def _build_inputs(payload: dict[str, Any]) -> list[dict[str, Any]]:
             inputs: list[dict[str, Any]] = []
             for key, value in payload.items():
@@ -561,7 +619,9 @@ class OpenCTIClient:
             ext_id = data.get("externalReferenceAdd", {}).get("id")
             if not ext_id:
                 return
-            patch = [{"key": "externalReferences", "operation": "add", "value": [ext_id]}]
+            patch = [
+                {"key": "externalReferences", "operation": "add", "value": [ext_id]}
+            ]
             self._post(patch_mutation, {"id": vuln_id, "input": patch})
         except Exception as exc:
             if "externalReferences" in str(exc) or "externalReferenceAdd" in str(exc):
@@ -597,7 +657,11 @@ class OpenCTIClient:
         if normalized_type in {"Domain-Name", "DomainName"}:
             normalized_value = normalized_value.rstrip(".")
             if not re.match(r"(?i)^(?:[a-z0-9-]+\.)+[a-z]{2,}$", normalized_value):
-                logger.warning("cvelist_observable_add_skipped type=%s value=%s", normalized_type, normalized_value)
+                logger.warning(
+                    "cvelist_observable_add_skipped type=%s value=%s",
+                    normalized_type,
+                    normalized_value,
+                )
                 return None
 
         field_map = {
@@ -620,7 +684,11 @@ class OpenCTIClient:
             try:
                 input_payload = {"number": int(raw)}
             except ValueError:
-                logger.warning("cvelist_observable_add_skipped type=%s value=%s", normalized_type, normalized_value)
+                logger.warning(
+                    "cvelist_observable_add_skipped type=%s value=%s",
+                    normalized_type,
+                    normalized_value,
+                )
                 return None
 
         mutation = f"""
@@ -632,7 +700,11 @@ class OpenCTIClient:
             data = self._post(mutation, {"type": normalized_type, field: input_payload})
         except Exception as exc:
             message = str(exc)
-            if "Unknown argument" in message or "Cannot query field" in message or "GRAPHQL_VALIDATION_FAILED" in message:
+            if (
+                "Unknown argument" in message
+                or "Cannot query field" in message
+                or "GRAPHQL_VALIDATION_FAILED" in message
+            ):
                 self._observables_supported = False
                 logger.warning("cvelist_observable_add_disabled")
                 return None
@@ -656,7 +728,9 @@ class OpenCTIClient:
             logger.warning("cvelist_relationship_add_failed error=%s", exc)
 
 
-def _process_cve_file(client: OpenCTIClient, path: Path, epss_scores: dict[str, dict[str, float]]) -> None:
+def _process_cve_file(
+    client: OpenCTIClient, path: Path, epss_scores: dict[str, dict[str, float]]
+) -> None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -701,13 +775,20 @@ def _process_cve_file(client: OpenCTIClient, path: Path, epss_scores: dict[str, 
                 try:
                     client.update_fields(vuln_id, update_fields)
                 except Exception as exc:
-                    logger.warning("cvelist_update_failed cve_id=%s error=%s", cve_id, exc)
+                    logger.warning(
+                        "cvelist_update_failed cve_id=%s error=%s", cve_id, exc
+                    )
 
         for url in references:
             try:
                 client.add_external_reference(vuln_id, "cvelistv5", url)
             except Exception as exc:
-                logger.warning("cvelist_reference_failed cve_id=%s url=%s error=%s", cve_id, url, exc)
+                logger.warning(
+                    "cvelist_reference_failed cve_id=%s url=%s error=%s",
+                    cve_id,
+                    url,
+                    exc,
+                )
                 continue
 
         for name in software_names:
@@ -718,7 +799,12 @@ def _process_cve_file(client: OpenCTIClient, path: Path, epss_scores: dict[str, 
                 if software_id:
                     client.create_relationship(vuln_id, software_id, "related-to")
             except Exception as exc:
-                logger.warning("cvelist_software_link_failed cve_id=%s software=%s error=%s", cve_id, name, exc)
+                logger.warning(
+                    "cvelist_software_link_failed cve_id=%s software=%s error=%s",
+                    cve_id,
+                    name,
+                    exc,
+                )
 
         logger.info("cvelist_processed cve_id=%s created=%s", cve_id, created)
 
@@ -726,7 +812,7 @@ def _process_cve_file(client: OpenCTIClient, path: Path, epss_scores: dict[str, 
 class CveListConnector:
     def __init__(self) -> None:
         opencti_url = os.getenv("OPENCTI_URL", "http://opencti:8080")
-        admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+        os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
         opencti_token = _select_opencti_token()
         if not opencti_token:
             raise RuntimeError("cvelist_missing_token")
@@ -753,7 +839,9 @@ class CveListConnector:
             return OpenCTIConnectorHelper(config)
 
         self.helper = _build_helper(opencti_token)
-        self.repo_url = os.getenv("CVELIST_REPO_URL", "https://github.com/CVEProject/cvelistV5.git")
+        self.repo_url = os.getenv(
+            "CVELIST_REPO_URL", "https://github.com/CVEProject/cvelistV5.git"
+        )
         self.branch = os.getenv("CVELIST_BRANCH", "main")
         self.interval = int(
             os.getenv(
@@ -765,7 +853,9 @@ class CveListConnector:
         self.state = StateStore("/data/state.json")
         self.client = OpenCTIClient(opencti_url, opencti_token)
         self.epss_url = os.getenv("CVELIST_EPSS_URL", EPSS_DEFAULT_URL)
-        self.epss_refresh_seconds = int(os.getenv("CVELIST_EPSS_REFRESH_SECONDS", str(EPSS_DEFAULT_REFRESH_SECONDS)))
+        self.epss_refresh_seconds = int(
+            os.getenv("CVELIST_EPSS_REFRESH_SECONDS", str(EPSS_DEFAULT_REFRESH_SECONDS))
+        )
         self.epss_path = Path("/data/epss/epss_scores-current.csv.gz")
 
     def _run(self) -> None:
@@ -778,7 +868,9 @@ class CveListConnector:
         }
         work = WorkTracker(self.helper, "CVE List V5 import")
         try:
-            refreshed = _ensure_epss_file(self.epss_path, self.epss_url, self.epss_refresh_seconds)
+            refreshed = _ensure_epss_file(
+                self.epss_path, self.epss_url, self.epss_refresh_seconds
+            )
             if refreshed:
                 logger.info("cvelist_epss_refreshed")
                 metrics["epss_refreshed"] = 1

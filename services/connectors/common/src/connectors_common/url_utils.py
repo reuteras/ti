@@ -32,7 +32,9 @@ def canonicalize_url(value: str) -> str:
     if netloc == "m.medium.com":
         netloc = "medium.com"
     scheme = parsed.scheme.lower()
-    if (scheme == "http" and netloc.endswith(":80")) or (scheme == "https" and netloc.endswith(":443")):
+    if (scheme == "http" and netloc.endswith(":80")) or (
+        scheme == "https" and netloc.endswith(":443")
+    ):
         netloc = netloc.rsplit(":", 1)[0]
     if path.endswith("/") and path != "/":
         path = path[:-1]

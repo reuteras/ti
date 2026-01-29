@@ -2,7 +2,7 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, Optional
+from typing import Optional
 
 
 @dataclass
@@ -167,7 +167,9 @@ class Storage:
 
     def get_latest_briefing(self) -> Optional[BriefingRecord]:
         cursor = self.conn.cursor()
-        cursor.execute("SELECT date, html, json FROM briefing ORDER BY date DESC LIMIT 1")
+        cursor.execute(
+            "SELECT date, html, json FROM briefing ORDER BY date DESC LIMIT 1"
+        )
         row = cursor.fetchone()
         if not row:
             return None
@@ -188,7 +190,10 @@ class Storage:
             (limit,),
         )
         rows = cursor.fetchall()
-        return [BriefingRecord(date=row["date"], html=row["html"], json=row["json"]) for row in rows]
+        return [
+            BriefingRecord(date=row["date"], html=row["html"], json=row["json"])
+            for row in rows
+        ]
 
     def close(self) -> None:
         self.conn.close()
@@ -295,7 +300,10 @@ class Storage:
             """
         )
         rows = cursor.fetchall()
-        return [(row["tag"], bool(row["approved"]), row["last_seen_at"] or "") for row in rows]
+        return [
+            (row["tag"], bool(row["approved"]), row["last_seen_at"] or "")
+            for row in rows
+        ]
 
     def set_zotero_tag_approved(self, tag: str, approved: bool) -> None:
         with self._lock:
@@ -336,7 +344,10 @@ class Storage:
             """
         )
         rows = cursor.fetchall()
-        return [(row["tag"], bool(row["approved"]), row["last_seen_at"] or "") for row in rows]
+        return [
+            (row["tag"], bool(row["approved"]), row["last_seen_at"] or "")
+            for row in rows
+        ]
 
     def set_readwise_tag_approved(self, tag: str, approved: bool) -> None:
         with self._lock:
@@ -353,7 +364,9 @@ class Storage:
         rows = cursor.fetchall()
         return [row["tag"] for row in rows]
 
-    def upsert_zotero_collection(self, collection_id: str, name: str, approved: bool) -> None:
+    def upsert_zotero_collection(
+        self, collection_id: str, name: str, approved: bool
+    ) -> None:
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(
@@ -364,7 +377,12 @@ class Storage:
                     name=excluded.name,
                     last_seen_at=excluded.last_seen_at
                 """,
-                (collection_id, name, 1 if approved else 0, datetime.now(timezone.utc).isoformat()),
+                (
+                    collection_id,
+                    name,
+                    1 if approved else 0,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
             )
             self._commit()
 
@@ -379,11 +397,18 @@ class Storage:
         )
         rows = cursor.fetchall()
         return [
-            (row["collection_id"], row["name"], bool(row["approved"]), row["last_seen_at"] or "")
+            (
+                row["collection_id"],
+                row["name"],
+                bool(row["approved"]),
+                row["last_seen_at"] or "",
+            )
             for row in rows
         ]
 
-    def set_zotero_collection_approved(self, collection_id: str, approved: bool) -> None:
+    def set_zotero_collection_approved(
+        self, collection_id: str, approved: bool
+    ) -> None:
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(

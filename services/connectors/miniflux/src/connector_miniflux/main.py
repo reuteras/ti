@@ -12,7 +12,11 @@ from pycti import OpenCTIConnectorHelper
 
 from connectors_common.dedup import find_best_match, prepare_candidates
 from connectors_common.fingerprint import content_fingerprint
-from connectors_common.identity import CandidateIdentity, resolve_canonical_id, store_identity_mappings
+from connectors_common.identity import (
+    CandidateIdentity,
+    resolve_canonical_id,
+    store_identity_mappings,
+)
 from connectors_common.mapping_store import MappingStore
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
 from connectors_common.enrichment import source_confidence, source_labels
@@ -23,7 +27,9 @@ from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.url_utils import canonicalize_url, url_hash
 from connectors_common.work import WorkTracker
 
-logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +42,9 @@ def _split_authors(value: str | None) -> list[str]:
 
 
 def _select_opencti_token() -> str:
-    return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+    return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv(
+        "OPENCTI_ADMIN_TOKEN", ""
+    )
 
 
 def _normalize_base_url(base_url: str) -> str:
@@ -49,7 +57,12 @@ def _normalize_base_url(base_url: str) -> str:
 def fetch_entries(base_url: str, token: str, offset: int, limit: int) -> list[dict]:
     url = f"{_normalize_base_url(base_url)}/v1/entries"
     headers = {"X-Auth-Token": token}
-    params = {"limit": limit, "offset": offset, "order": "published_at", "direction": "desc"}
+    params = {
+        "limit": limit,
+        "offset": offset,
+        "order": "published_at",
+        "direction": "desc",
+    }
     with httpx.Client(timeout=30) as client:
         response = client.get(url, headers=headers, params=params)
         response.raise_for_status()
@@ -96,7 +109,10 @@ def _fetch_source_text(url: str) -> str:
             response = client.get(url, headers=headers)
             response.raise_for_status()
             content_type = response.headers.get("Content-Type", "")
-            if "text/html" not in content_type and "application/xhtml+xml" not in content_type:
+            if (
+                "text/html" not in content_type
+                and "application/xhtml+xml" not in content_type
+            ):
                 return ""
             return response.text or ""
     except Exception:
@@ -113,6 +129,7 @@ def _author_key(prefix: str, feed_id: int | None, source_url: str, name: str) ->
         digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
         return f"{prefix}:unknown:{digest}"
     return ""
+
 
 def _derive_org_name(feed_title: str, source_url: str) -> str:
     raw = (feed_title or "").strip()
@@ -143,13 +160,12 @@ def _derive_org_name(feed_title: str, source_url: str) -> str:
     return ""
 
 
-
 class MinifluxConnector:
     def __init__(self) -> None:
         self.base_url = os.getenv("MINIFLUX_URL", "")
         self.token = os.getenv("MINIFLUX_API_KEY", "")
         opencti_url = os.getenv("OPENCTI_URL", "http://opencti:8080")
-        admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+        os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
         opencti_token = _select_opencti_token()
         if not opencti_token:
             raise RuntimeError("miniflux_missing_token")
@@ -185,11 +201,17 @@ class MinifluxConnector:
         self.state = StateStore("/data/state.json")
         mapping_path = os.getenv("TI_MAPPING_DB", "/data/mapping/ti-mapping.sqlite")
         self.mapping = MappingStore(mapping_path)
-        self.allow_title_fallback = os.getenv("TI_ALLOW_TITLE_FALLBACK", "false").lower() == "true"
+        self.allow_title_fallback = (
+            os.getenv("TI_ALLOW_TITLE_FALLBACK", "false").lower() == "true"
+        )
         self.store_html_note = os.getenv("STORE_HTML_NOTE", "false").lower() == "true"
         default_confidence = os.getenv("TI_CONFIDENCE_IMPORT", "").strip()
-        self.default_confidence = int(default_confidence) if default_confidence else None
-        self.client = OpenCTIClient(opencti_url, opencti_token, fallback_token=self.fallback_token)
+        self.default_confidence = (
+            int(default_confidence) if default_confidence else None
+        )
+        self.client = OpenCTIClient(
+            opencti_url, opencti_token, fallback_token=self.fallback_token
+        )
 
     def _resolve_author(self, key: str, name: str, identity_type: str) -> str | None:
         if not key or not name:
@@ -238,7 +260,9 @@ class MinifluxConnector:
             if last_published_raw:
                 cutoff_dt = isoparse(last_published_raw)
             else:
-                cutoff_dt = datetime.now(timezone.utc) - timedelta(days=self.lookback_days)
+                cutoff_dt = datetime.now(timezone.utc) - timedelta(
+                    days=self.lookback_days
+                )
 
             recent_reports = self.client.list_reports_since(
                 datetime.now(timezone.utc) - timedelta(days=self.dedup_days)
@@ -267,13 +291,19 @@ class MinifluxConnector:
                     if feed_id not in approved_feed_ids:
                         metrics["entries_skipped"] += 1
                         continue
-                    published = entry.get("published_at") or entry.get("updated_at") or entry.get("created_at")
+                    published = (
+                        entry.get("published_at")
+                        or entry.get("updated_at")
+                        or entry.get("created_at")
+                    )
                     if not published:
                         published_dt = datetime.now(timezone.utc)
                     else:
                         published_dt = isoparse(published)
 
-                    if published_dt < cutoff_dt or (published_dt == cutoff_dt and entry_id <= last_id):
+                    if published_dt < cutoff_dt or (
+                        published_dt == cutoff_dt and entry_id <= last_id
+                    ):
                         reached_cutoff = True
                         metrics["entries_skipped"] += 1
                         continue
@@ -314,19 +344,29 @@ class MinifluxConnector:
                     if authors:
                         author_name = "; ".join(authors)
                         primary = authors[0]
-                        author_key = _author_key("miniflux", feed_id, source_url, primary)
-                        author_id = self._resolve_author(author_key, primary, "Individual")
+                        author_key = _author_key(
+                            "miniflux", feed_id, source_url, primary
+                        )
+                        author_id = self._resolve_author(
+                            author_key, primary, "Individual"
+                        )
                         if author_id:
                             author_ids.append(author_id)
                         for name in authors[1:]:
-                            extra_key = _author_key("miniflux", feed_id, source_url, name)
-                            extra_id = self._resolve_author(extra_key, name, "Individual")
+                            extra_key = _author_key(
+                                "miniflux", feed_id, source_url, name
+                            )
+                            extra_id = self._resolve_author(
+                                extra_key, name, "Individual"
+                            )
                             if extra_id:
                                 author_ids.append(extra_id)
                     org_name = _derive_org_name(feed_title, source_url)
                     org_id = None
                     if org_name:
-                        org_key = _author_key("miniflux-org", feed_id, source_url, org_name)
+                        org_key = _author_key(
+                            "miniflux-org", feed_id, source_url, org_name
+                        )
                         org_id = self._resolve_author(org_key, org_name, "Organization")
 
                     confidence = source_confidence("miniflux")
@@ -363,7 +403,9 @@ class MinifluxConnector:
                         allow_title_fallback=self.allow_title_fallback,
                     )
                     if not report_id and self.allow_title_fallback:
-                        duplicate = find_best_match(report.title, candidates, self.dedup_threshold)
+                        duplicate = find_best_match(
+                            report.title, candidates, self.dedup_threshold
+                        )
                         if duplicate:
                             report_id = duplicate.report_id
                             match_reason = "title_similarity"
@@ -383,7 +425,9 @@ class MinifluxConnector:
                             match_reason or "created",
                         )
                         existing_url_owner = self.mapping.get_by_url_hash(url_digest)
-                        store_identity_mappings(self.mapping, report_id, "Report", candidate)
+                        store_identity_mappings(
+                            self.mapping, report_id, "Report", candidate
+                        )
                         should_add_ref = True
                         if url_digest:
                             should_add_ref = self.state.remember_hash(
@@ -438,9 +482,13 @@ class MinifluxConnector:
                                 )
                                 metrics["external_refs_added"] += 1
                         for author_id in author_ids:
-                            self.client.create_relationship(report_id, author_id, "related-to")
+                            self.client.create_relationship(
+                                report_id, author_id, "related-to"
+                            )
                         if org_id:
-                            self.client.create_relationship(report_id, org_id, "related-to")
+                            self.client.create_relationship(
+                                report_id, org_id, "related-to"
+                            )
                         if self.store_html_note:
                             html_note = content_html or summary_html
                             if html_note:
@@ -453,7 +501,10 @@ class MinifluxConnector:
                                 metrics["notes_created"] += 1
                     else:
                         metrics["reports_failed"] += 1
-                        logger.info("report_skipped source=miniflux reason=create_failed title=%s", report.title)
+                        logger.info(
+                            "report_skipped source=miniflux reason=create_failed title=%s",
+                            report.title,
+                        )
                     if published_dt > max_published_dt or (
                         published_dt == max_published_dt and entry_id > max_entry_id
                     ):
@@ -490,6 +541,7 @@ class MinifluxConnector:
             logger.exception("miniflux_run_failed error=%s", exc)
             run_state.failure(str(exc), **metrics)
             raise
+
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):
             self.helper.schedule(self._run, self.interval)

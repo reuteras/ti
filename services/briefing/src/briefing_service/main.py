@@ -10,7 +10,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+)
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from .briefing import build_daily_briefing
@@ -89,11 +94,17 @@ def _load_denylist(path: str) -> list[str] | dict[str, list[str]]:
     return []
 
 
-def _normalize_denylist(payload: list[str] | dict[str, list[str]]) -> dict[str, list[str]]:
+def _normalize_denylist(
+    payload: list[str] | dict[str, list[str]],
+) -> dict[str, list[str]]:
     if isinstance(payload, list):
         return {"all": payload}
     if isinstance(payload, dict):
-        return {key: list(value) for key, value in payload.items() if isinstance(value, list)}
+        return {
+            key: list(value)
+            for key, value in payload.items()
+            if isinstance(value, list)
+        }
     return {"all": []}
 
 
@@ -131,7 +142,9 @@ async def request_id_middleware(request: Request, call_next):
 def on_startup() -> None:
     global storage, scheduler
     storage = Storage(os.getenv("BRIEFING_DB_PATH", "/data/briefing.sqlite"))
-    opencti_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+    opencti_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv(
+        "OPENCTI_ADMIN_TOKEN", ""
+    )
     client = OpenCTIClient(
         os.getenv("OPENCTI_URL", "http://opencti:8080"),
         opencti_token,
@@ -142,7 +155,11 @@ def on_startup() -> None:
         if storage is None:
             return
         briefing = build_daily_briefing(storage, client)
-        logger.info("daily_briefing_generated date=%s items=%s", briefing.date, len(briefing.items))
+        logger.info(
+            "daily_briefing_generated date=%s items=%s",
+            briefing.date,
+            len(briefing.items),
+        )
 
     def refresh_miniflux_job() -> None:
         if storage is None:
@@ -175,7 +192,9 @@ def on_startup() -> None:
         minute=_get_env_int("BRIEFING_SCHEDULE_MINUTE", 5),
     )
     scheduler.add_job(run_daily_job, trigger, id="daily_briefing")
-    scheduler.add_job(refresh_miniflux_job, IntervalTrigger(hours=1), id="miniflux_refresh")
+    scheduler.add_job(
+        refresh_miniflux_job, IntervalTrigger(hours=1), id="miniflux_refresh"
+    )
     scheduler.add_job(refresh_zotero_job, IntervalTrigger(hours=1), id="zotero_refresh")
     readwise_interval = int(os.getenv("READWISE_TAG_REFRESH_MINUTES", "60"))
     scheduler.add_job(
@@ -214,7 +233,15 @@ async def denylist() -> Response:
 async def denylist_page() -> str:
     path = os.getenv("DENYLIST_PATH", "/data/denylist.json")
     payload = _normalize_denylist(_load_denylist(path))
-    categories = ["all", "persons", "organizations", "products", "countries", "authors", "patterns"]
+    categories = [
+        "all",
+        "persons",
+        "organizations",
+        "products",
+        "countries",
+        "authors",
+        "patterns",
+    ]
     for category in categories:
         payload.setdefault(category, [])
     payload = {key: sorted(values) for key, values in payload.items()}
@@ -280,8 +307,16 @@ async def index() -> str:
         ("/miniflux/feeds", "Miniflux feeds", "Approve the feeds you want to ingest."),
         ("/readwise/tags", "Readwise tags", "Approve tags for Readwise ingestion."),
         ("/zotero/tags", "Zotero tags", "Approve tags for Zotero ingestion."),
-        ("/zotero/collections", "Zotero collections", "Approve collections for Zotero ingestion."),
-        ("/feeds/daily.rss", "Daily briefings RSS", "Subscribe to daily briefing feed."),
+        (
+            "/zotero/collections",
+            "Zotero collections",
+            "Approve collections for Zotero ingestion.",
+        ),
+        (
+            "/feeds/daily.rss",
+            "Daily briefings RSS",
+            "Subscribe to daily briefing feed.",
+        ),
         ("/latest", "Latest briefing", "View the most recent briefing."),
     ]
     template = env.get_template("index.html")
@@ -363,7 +398,7 @@ async def miniflux_feeds_refresh() -> RedirectResponse:
 @app.post("/miniflux/feeds/refresh.json")
 async def miniflux_feeds_refresh_json() -> Response:
     if storage is None:
-        return Response(content="{\"status\":\"not_ready\"}", media_type="application/json")
+        return Response(content='{"status":"not_ready"}', media_type="application/json")
     count = refresh_feeds(storage)
     payload = json.dumps({"status": "ok", "count": count})
     return Response(content=payload, media_type="application/json")

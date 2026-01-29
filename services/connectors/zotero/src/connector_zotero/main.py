@@ -14,7 +14,11 @@ from pyzotero import zotero, zotero_errors
 
 from connectors_common.dedup import find_best_match, prepare_candidates
 from connectors_common.fingerprint import content_fingerprint
-from connectors_common.identity import CandidateIdentity, resolve_canonical_id, store_identity_mappings
+from connectors_common.identity import (
+    CandidateIdentity,
+    resolve_canonical_id,
+    store_identity_mappings,
+)
 from connectors_common.mapping_store import MappingStore
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
 from connectors_common.enrichment import source_confidence, source_labels
@@ -25,7 +29,9 @@ from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.url_utils import canonicalize_url, normalize_doi, url_hash
 from connectors_common.work import WorkTracker
 
-logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s"
+)
 logger = logging.getLogger(__name__)
 
 _URL_RE = re.compile(r"https?://[^\s<>\"]+")
@@ -53,7 +59,9 @@ def _split_authors(value: str | None) -> list[str]:
 
 
 def _select_opencti_token() -> str:
-    return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+    return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv(
+        "OPENCTI_ADMIN_TOKEN", ""
+    )
 
 
 def _author_key(prefix: str, source_url: str, name: str) -> str:
@@ -78,7 +86,9 @@ def _parse_zotero_date(value: str | None) -> datetime | None:
     return parsed
 
 
-def fetch_items(client: zotero.Zotero, since_version: str | None) -> tuple[list[dict], str | None, int]:
+def fetch_items(
+    client: zotero.Zotero, since_version: str | None
+) -> tuple[list[dict], str | None, int]:
     first_page = client.items(limit=50, since=since_version)
     items = list(first_page)
     page_count = 1
@@ -137,7 +147,9 @@ def fetch_attachment_fulltext(
 ) -> dict[str, Any] | None:
     if not item_key:
         return None
-    base_url = f"https://api.zotero.org/{library_type}s/{library_id}/items/{item_key}/fulltext"
+    base_url = (
+        f"https://api.zotero.org/{library_type}s/{library_id}/items/{item_key}/fulltext"
+    )
     headers = {"Zotero-API-Key": api_key}
     with httpx.Client(timeout=30) as client:
         response = client.get(base_url, headers=headers)
@@ -170,7 +182,9 @@ def fetch_approved_tags(briefing_url: str) -> set[str]:
                 payload = response.json()
                 break
         except Exception as exc:
-            logger.warning("zotero_tag_filter_unavailable attempt=%s error=%s", attempt + 1, exc)
+            logger.warning(
+                "zotero_tag_filter_unavailable attempt=%s error=%s", attempt + 1, exc
+            )
             time.sleep(2**attempt)
     if payload is None:
         return set()
@@ -191,12 +205,20 @@ def fetch_approved_collections(briefing_url: str) -> set[str]:
                 payload = response.json()
                 break
         except Exception as exc:
-            logger.warning("zotero_collection_filter_unavailable attempt=%s error=%s", attempt + 1, exc)
+            logger.warning(
+                "zotero_collection_filter_unavailable attempt=%s error=%s",
+                attempt + 1,
+                exc,
+            )
             time.sleep(2**attempt)
     if payload is None:
         return set()
     try:
-        return {str(collection_id) for collection_id in payload if str(collection_id).strip()}
+        return {
+            str(collection_id)
+            for collection_id in payload
+            if str(collection_id).strip()
+        }
     except Exception:
         return set()
 
@@ -207,7 +229,7 @@ class ZoteroConnector:
         self.library_id = os.getenv("ZOTERO_LIBRARY_ID", "")
         self.library_type = os.getenv("ZOTERO_LIBRARY_TYPE", "user")
         opencti_url = os.getenv("OPENCTI_URL", "http://opencti:8080")
-        admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+        os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
         opencti_token = _select_opencti_token()
         if not opencti_token:
             raise RuntimeError("zotero_missing_token")
@@ -242,14 +264,24 @@ class ZoteroConnector:
         self.state = StateStore("/data/state.json")
         mapping_path = os.getenv("TI_MAPPING_DB", "/data/mapping/ti-mapping.sqlite")
         self.mapping = MappingStore(mapping_path)
-        self.allow_title_fallback = os.getenv("TI_ALLOW_TITLE_FALLBACK", "false").lower() == "true"
+        self.allow_title_fallback = (
+            os.getenv("TI_ALLOW_TITLE_FALLBACK", "false").lower() == "true"
+        )
         self.zotero_lookback_days = int(os.getenv("TI_ZOTERO_LOOKBACK_DAYS", "30"))
         link_strategy = os.getenv("TI_LINK_STRATEGY", "none").lower()
-        self.link_strategy = link_strategy if link_strategy in {"report", "reference_only", "none"} else "none"
+        self.link_strategy = (
+            link_strategy
+            if link_strategy in {"report", "reference_only", "none"}
+            else "none"
+        )
         default_confidence = os.getenv("TI_CONFIDENCE_IMPORT", "").strip()
-        self.default_confidence = int(default_confidence) if default_confidence else None
+        self.default_confidence = (
+            int(default_confidence) if default_confidence else None
+        )
         self.note_max_chars = int(os.getenv("NOTE_MAX_CHARS", "150000"))
-        self.client = OpenCTIClient(opencti_url, opencti_token, fallback_token=self.fallback_token)
+        self.client = OpenCTIClient(
+            opencti_url, opencti_token, fallback_token=self.fallback_token
+        )
         self.zotero = (
             zotero.Zotero(self.library_id, self.library_type, self.api_key)
             if self.api_key and self.library_id
@@ -278,7 +310,9 @@ class ZoteroConnector:
                 tag_value = tag
             if isinstance(tag_value, str) and tag_value.strip():
                 tag_values.add(tag_value.strip())
-        collection_values = {str(cid) for cid in data.get("collections") or [] if str(cid).strip()}
+        collection_values = {
+            str(cid) for cid in data.get("collections") or [] if str(cid).strip()
+        }
         return tag_values, collection_values
 
     def _allowed_item(
@@ -287,7 +321,10 @@ class ZoteroConnector:
         if not approved_tags and not approved_collections:
             return True
         tag_values, collection_values = self._extract_tags_and_collections(data)
-        return bool(tag_values.intersection(approved_tags) or collection_values.intersection(approved_collections))
+        return bool(
+            tag_values.intersection(approved_tags)
+            or collection_values.intersection(approved_collections)
+        )
 
     def _upsert_report(
         self,
@@ -299,7 +336,9 @@ class ZoteroConnector:
         cutoff_dt: datetime | None,
     ) -> tuple[str | None, bool]:
         if cutoff_dt:
-            date_value = data.get("dateModified") or data.get("dateAdded") or data.get("date")
+            date_value = (
+                data.get("dateModified") or data.get("dateAdded") or data.get("date")
+            )
             parsed = _parse_zotero_date(date_value)
             if parsed and parsed < cutoff_dt:
                 return None, False
@@ -425,7 +464,9 @@ class ZoteroConnector:
             for author_id in author_ids:
                 self.client.create_relationship(report_id, author_id, "related-to")
         else:
-            logger.info("report_skipped source=zotero reason=create_failed title=%s", title)
+            logger.info(
+                "report_skipped source=zotero reason=create_failed title=%s", title
+            )
         return report_id, created_new
 
     def _run(self) -> None:
@@ -453,7 +494,9 @@ class ZoteroConnector:
             since_fulltext_version = self.state.get("last_fulltext_version")
             cutoff_dt = None
             if not since_version and self.zotero_lookback_days > 0:
-                cutoff_dt = datetime.now(timezone.utc) - timedelta(days=self.zotero_lookback_days)
+                cutoff_dt = datetime.now(timezone.utc) - timedelta(
+                    days=self.zotero_lookback_days
+                )
             approved_tags = fetch_approved_tags(self.briefing_url)
             approved_collections = fetch_approved_collections(self.briefing_url)
             if not approved_tags and not approved_collections:
@@ -461,7 +504,9 @@ class ZoteroConnector:
                 work.done("No approved filters")
                 run_state.skipped("no_approved_filters", **metrics)
                 return
-            recent_reports = self.client.list_reports_since(datetime.now(timezone.utc) - timedelta(days=self.dedup_days))
+            recent_reports = self.client.list_reports_since(
+                datetime.now(timezone.utc) - timedelta(days=self.dedup_days)
+            )
             candidates = prepare_candidates(recent_reports)
             if not self.zotero:
                 logger.warning("zotero_not_configured")
@@ -507,7 +552,9 @@ class ZoteroConnector:
                 if not parent_key:
                     metrics["items_skipped"] += 1
                     continue
-                report_id = self.mapping.get_by_external_id("zotero_item", str(parent_key))
+                report_id = self.mapping.get_by_external_id(
+                    "zotero_item", str(parent_key)
+                )
                 if not report_id:
                     metrics["items_skipped"] += 1
                     continue
@@ -519,8 +566,12 @@ class ZoteroConnector:
                     external_id = f"{parent_key}:{annotation_key}"
                 else:
                     fingerprint = f"{parent_key}:{page_label or ''}:{annotation_text.lower()[:200]}"
-                    external_id = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
-                existing_note = self.mapping.get_by_external_id("zotero_annot", external_id)
+                    external_id = hashlib.sha256(
+                        fingerprint.encode("utf-8")
+                    ).hexdigest()
+                existing_note = self.mapping.get_by_external_id(
+                    "zotero_annot", external_id
+                )
                 if existing_note:
                     continue
                 lines = []
@@ -542,8 +593,12 @@ class ZoteroConnector:
                 )
                 if note_id and external_id:
                     metrics["notes_created"] += 1
-                    self.mapping.upsert_external_id("zotero_annot", external_id, note_id, "Note")
-                self._handle_extracted_links(report_id, annotation_text, annotation_comment)
+                    self.mapping.upsert_external_id(
+                        "zotero_annot", external_id, note_id, "Note"
+                    )
+                self._handle_extracted_links(
+                    report_id, annotation_text, annotation_comment
+                )
                 metrics["annotations_processed"] += 1
             self._process_fulltext(
                 approved_tags,
@@ -589,7 +644,9 @@ class ZoteroConnector:
         except Exception as exc:
             logger.warning("zotero_fulltext_list_failed error=%s", exc)
             return
-        logger.info("zotero_fulltext_pages pages=%s keys=%s", fulltext_pages, len(changed_keys))
+        logger.info(
+            "zotero_fulltext_pages pages=%s keys=%s", fulltext_pages, len(changed_keys)
+        )
         keys = list(dict.fromkeys([*pending, *changed_keys]))
         if not keys:
             if last_version and last_version != since_fulltext_version:
@@ -620,7 +677,9 @@ class ZoteroConnector:
             if not normalized.strip():
                 continue
             content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-            if not self.state.remember_hash("zotero_fulltext", f"{attachment_key}:{content_hash}"):
+            if not self.state.remember_hash(
+                "zotero_fulltext", f"{attachment_key}:{content_hash}"
+            ):
                 continue
 
             report_id = self.mapping.get_by_external_id("zotero_item", str(parent_key))
@@ -640,17 +699,26 @@ class ZoteroConnector:
             if not report_id:
                 continue
 
-            attachment_title = data.get("title") or data.get("filename") or f"Attachment {attachment_key}"
+            attachment_title = (
+                data.get("title")
+                or data.get("filename")
+                or f"Attachment {attachment_key}"
+            )
             content_body = normalized[: self.note_max_chars]
             updated = self.client.update_report_description(report_id, content_body)
             if not updated:
-                logger.warning("zotero_fulltext_description_update_failed report_id=%s", report_id)
+                logger.warning(
+                    "zotero_fulltext_description_update_failed report_id=%s", report_id
+                )
             artifact_id = self.client.create_artifact(
                 content_hash,
                 name=attachment_title,
                 url=None,
                 mime_type=None,
-                additional_names=[f"zotero:{attachment_key}", f"zotero_parent:{parent_key}"],
+                additional_names=[
+                    f"zotero:{attachment_key}",
+                    f"zotero_parent:{parent_key}",
+                ],
             )
             if artifact_id:
                 self.client.create_relationship(report_id, artifact_id, "related-to")
@@ -683,7 +751,9 @@ class ZoteroConnector:
             self._run()
             time.sleep(self.interval)
 
-    def _handle_extracted_links(self, report_id: str, annotation_text: str, annotation_comment: str) -> None:
+    def _handle_extracted_links(
+        self, report_id: str, annotation_text: str, annotation_comment: str
+    ) -> None:
         if self.link_strategy == "none":
             return
         urls = set()
@@ -702,7 +772,9 @@ class ZoteroConnector:
             existing_id = self.mapping.get_by_url_hash(digest)
             if existing_id:
                 if existing_id != report_id and existing_id not in linked_ids:
-                    self.client.create_relationship(report_id, existing_id, "related-to")
+                    self.client.create_relationship(
+                        report_id, existing_id, "related-to"
+                    )
                     linked_ids.add(existing_id)
                 continue
             if self.link_strategy == "reference_only":
@@ -711,7 +783,9 @@ class ZoteroConnector:
                     f"{report_id}:{digest}",
                 )
                 if should_add_ref:
-                    self.client.add_external_reference_to_report(report_id, "zotero", canonical, digest)
+                    self.client.add_external_reference_to_report(
+                        report_id, "zotero", canonical, digest
+                    )
                 continue
             if self.link_strategy == "report":
                 linked_id = self._resolve_or_create_linked_report(canonical)
@@ -721,7 +795,9 @@ class ZoteroConnector:
 
     def _resolve_or_create_linked_report(self, url: str) -> str | None:
         candidate = CandidateIdentity(urls=[url])
-        report_id, _ = resolve_canonical_id(self.mapping, candidate, allow_title_fallback=False)
+        report_id, _ = resolve_canonical_id(
+            self.mapping, candidate, allow_title_fallback=False
+        )
         if report_id:
             return report_id
         title = url

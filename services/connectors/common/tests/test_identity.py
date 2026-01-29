@@ -1,4 +1,8 @@
-from connectors_common.identity import CandidateIdentity, resolve_canonical_id, store_identity_mappings
+from connectors_common.identity import (
+    CandidateIdentity,
+    resolve_canonical_id,
+    store_identity_mappings,
+)
 from connectors_common.mapping_store import MappingStore
 
 

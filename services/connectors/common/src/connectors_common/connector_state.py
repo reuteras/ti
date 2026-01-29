@@ -64,7 +64,9 @@ class ConnectorState:
         self.update(**metrics)
         self._finalize(status="skipped", clear_error=True)
 
-    def _finalize(self, status: str, error: str | None = None, clear_error: bool = False) -> None:
+    def _finalize(
+        self, status: str, error: str | None = None, clear_error: bool = False
+    ) -> None:
         end = datetime.now(timezone.utc)
         state = _load_state(self._helper)
         if self._metrics:

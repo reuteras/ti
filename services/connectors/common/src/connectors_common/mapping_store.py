@@ -91,7 +91,9 @@ class MappingStore:
             ).fetchone()
         return row[0] if row else None
 
-    def upsert_url(self, url_hash: str, canonical_url: str, opencti_id: str, obj_type: str) -> None:
+    def upsert_url(
+        self, url_hash: str, canonical_url: str, opencti_id: str, obj_type: str
+    ) -> None:
         if not url_hash or not opencti_id:
             return
         with self._connect() as conn:
@@ -118,7 +120,9 @@ class MappingStore:
             ).fetchone()
         return row[0] if row else None
 
-    def upsert_external_id(self, source: str, external_id: str, opencti_id: str, obj_type: str) -> None:
+    def upsert_external_id(
+        self, source: str, external_id: str, opencti_id: str, obj_type: str
+    ) -> None:
         if not source or not external_id or not opencti_id:
             return
         with self._connect() as conn:
@@ -189,7 +193,9 @@ class MappingStore:
             ).fetchone()
         return row[0] if row else None
 
-    def upsert_content_fp(self, content_fp: str, opencti_id: str, obj_type: str) -> None:
+    def upsert_content_fp(
+        self, content_fp: str, opencti_id: str, obj_type: str
+    ) -> None:
         if not content_fp or not opencti_id:
             return
         with self._connect() as conn:

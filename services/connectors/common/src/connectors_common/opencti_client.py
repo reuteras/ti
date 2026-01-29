@@ -48,13 +48,15 @@ def _is_es_overloaded(exc: Exception) -> bool:
     return (
         "es_rejected_execution_exception" in msg
         or "statuscode': 429" in msg
-        or "statuscode\": 429" in msg
+        or 'statuscode": 429' in msg
         or "find direct ids fail" in msg
     )
 
 
 class OpenCTIClient:
-    def __init__(self, base_url: str, admin_token: str, fallback_token: str | None = None) -> None:
+    def __init__(
+        self, base_url: str, admin_token: str, fallback_token: str | None = None
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.admin_token = admin_token
         self.fallback_token = fallback_token or ""
@@ -65,7 +67,9 @@ class OpenCTIClient:
         self._country_supported = True
         self._label_cache: dict[str, str] = {}
 
-    def _post_with_token(self, token: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+    def _post_with_token(
+        self, token: str, query: str, variables: dict[str, Any]
+    ) -> dict[str, Any]:
         url = f"{self.base_url}/graphql"
         headers = {"Content-Type": "application/json"}
         if token:
@@ -83,7 +87,11 @@ class OpenCTIClient:
         try:
             return self._post_with_token(self.admin_token, query, variables)
         except Exception as exc:
-            if self.fallback_token and self.fallback_token != self.admin_token and _is_auth_required(exc):
+            if (
+                self.fallback_token
+                and self.fallback_token != self.admin_token
+                and _is_auth_required(exc)
+            ):
                 return self._post_with_token(self.fallback_token, query, variables)
             raise
 
@@ -221,7 +229,9 @@ class OpenCTIClient:
             notes.append(node)
         return notes
 
-    def add_external_reference_to_report(self, report_id: str, source_name: str, url: str, external_id: str | None) -> None:
+    def add_external_reference_to_report(
+        self, report_id: str, source_name: str, url: str, external_id: str | None
+    ) -> None:
         if not self.admin_token or not report_id or not url:
             return
         if not self._external_refs_supported:
@@ -229,7 +239,13 @@ class OpenCTIClient:
         external_ref_id = self._create_external_reference(source_name, url, external_id)
         if not external_ref_id:
             return
-        patch = [{"key": "externalReferences", "operation": "add", "value": [external_ref_id]}]
+        patch = [
+            {
+                "key": "externalReferences",
+                "operation": "add",
+                "value": [external_ref_id],
+            }
+        ]
         mutations = [
             """
             mutation ReportEdit($id: ID!, $input: [EditInput]!) {
@@ -344,7 +360,9 @@ class OpenCTIClient:
                 continue
         return False
 
-    def _create_external_reference(self, source_name: str, url: str, external_id: str | None) -> str | None:
+    def _create_external_reference(
+        self, source_name: str, url: str, external_id: str | None
+    ) -> str | None:
         if not self.admin_token:
             return None
         mutation = """
@@ -414,7 +432,9 @@ class OpenCTIClient:
             return None
         return data.get("malwareAdd", {}).get("id")
 
-    def create_identity(self, name: str, identity_type: str = "Individual") -> str | None:
+    def create_identity(
+        self, name: str, identity_type: str = "Individual"
+    ) -> str | None:
         if not self.admin_token:
             return None
         existing = self._find_entity_id("identities", name)
@@ -651,7 +671,11 @@ class OpenCTIClient:
         if normalized_type in {"Domain-Name", "DomainName"}:
             normalized_value = normalized_value.rstrip(".")
             if not re.match(r"(?i)^(?:[a-z0-9-]+\.)+[a-z]{2,}$", normalized_value):
-                logger.debug("opencti_observable_add_skipped type=%s value=%s", normalized_type, normalized_value)
+                logger.debug(
+                    "opencti_observable_add_skipped type=%s value=%s",
+                    normalized_type,
+                    normalized_value,
+                )
                 return None
 
         field_map = {
@@ -674,7 +698,11 @@ class OpenCTIClient:
             try:
                 input_payload = {"number": int(raw)}
             except ValueError:
-                logger.debug("opencti_observable_add_skipped type=%s value=%s", normalized_type, normalized_value)
+                logger.debug(
+                    "opencti_observable_add_skipped type=%s value=%s",
+                    normalized_type,
+                    normalized_value,
+                )
                 return None
 
         mutation = f"""
@@ -686,7 +714,11 @@ class OpenCTIClient:
             data = self._post(mutation, {"type": normalized_type, field: input_payload})
         except Exception as exc:
             message = str(exc)
-            if "Unknown argument" in message or "Cannot query field" in message or "GRAPHQL_VALIDATION_FAILED" in message:
+            if (
+                "Unknown argument" in message
+                or "Cannot query field" in message
+                or "GRAPHQL_VALIDATION_FAILED" in message
+            ):
                 self._observables_supported = False
                 logger.warning("opencti_observable_add_disabled")
                 return None
@@ -705,13 +737,22 @@ class OpenCTIClient:
         normalized_hash = (hash_value or "").strip()
         if not normalized_hash:
             return None
-        algo = algorithm.strip().upper().replace("SHA1", "SHA-1").replace("SHA256", "SHA-256")
+        algo = (
+            algorithm.strip()
+            .upper()
+            .replace("SHA1", "SHA-1")
+            .replace("SHA256", "SHA-256")
+        )
         expected_lengths = {"MD5": 32, "SHA-1": 40, "SHA-256": 64}
         expected_len = expected_lengths.get(algo)
         if not expected_len or len(normalized_hash) != expected_len:
-            logger.debug("opencti_file_hash_skipped algorithm=%s hash=%s", algo, normalized_hash)
+            logger.debug(
+                "opencti_file_hash_skipped algorithm=%s hash=%s", algo, normalized_hash
+            )
             return None
-        input_payload: dict[str, Any] = {"hashes": [{"algorithm": algo, "hash": normalized_hash}]}
+        input_payload: dict[str, Any] = {
+            "hashes": [{"algorithm": algo, "hash": normalized_hash}]
+        }
         mutation = """
         mutation ObservableAdd($type: String!, $StixFile: StixFileAddInput) {
           stixCyberObservableAdd(type: $type, StixFile: $StixFile) { id }
@@ -721,7 +762,11 @@ class OpenCTIClient:
             data = self._post(mutation, {"type": "StixFile", "StixFile": input_payload})
         except Exception as exc:
             message = str(exc)
-            if "Unknown argument" in message or "Cannot query field" in message or "GRAPHQL_VALIDATION_FAILED" in message:
+            if (
+                "Unknown argument" in message
+                or "Cannot query field" in message
+                or "GRAPHQL_VALIDATION_FAILED" in message
+            ):
                 self._observables_supported = False
                 logger.warning("opencti_observable_add_disabled")
                 return None
@@ -761,7 +806,11 @@ class OpenCTIClient:
             data = self._post(mutation, {"type": "Artifact", "Artifact": input_payload})
         except Exception as exc:
             message = str(exc)
-            if "Unknown argument" in message or "Cannot query field" in message or "GRAPHQL_VALIDATION_FAILED" in message:
+            if (
+                "Unknown argument" in message
+                or "Cannot query field" in message
+                or "GRAPHQL_VALIDATION_FAILED" in message
+            ):
                 self._observables_supported = False
                 logger.warning("opencti_observable_add_disabled")
                 return None
@@ -833,7 +882,9 @@ class OpenCTIClient:
           }
         }
         """
-        description_lines = [escape_markdown(report.description.strip())] if report.description else []
+        description_lines = (
+            [escape_markdown(report.description.strip())] if report.description else []
+        )
         if report.author:
             description_lines.append(f"Author: {escape_markdown(report.author)}")
         if report.source_url:

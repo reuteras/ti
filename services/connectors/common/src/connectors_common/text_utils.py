@@ -46,7 +46,9 @@ class _TextExtractor(HTMLParser):
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\\s+(?=[A-Z])")
 
 
-def format_readable_text(value: str, max_paragraph_chars: int = 700, sentences_per_paragraph: int = 3) -> str:
+def format_readable_text(
+    value: str, max_paragraph_chars: int = 700, sentences_per_paragraph: int = 3
+) -> str:
     text = (value or "").strip()
     if not text:
         return ""
@@ -58,7 +60,9 @@ def format_readable_text(value: str, max_paragraph_chars: int = 700, sentences_p
         if len(paragraph) <= max_paragraph_chars:
             rebuilt.append(paragraph)
             continue
-        sentences = [part.strip() for part in _SENTENCE_SPLIT.split(paragraph) if part.strip()]
+        sentences = [
+            part.strip() for part in _SENTENCE_SPLIT.split(paragraph) if part.strip()
+        ]
         if len(sentences) <= 1:
             rebuilt.append(paragraph)
             continue

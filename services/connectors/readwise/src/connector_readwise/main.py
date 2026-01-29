@@ -13,7 +13,11 @@ from typing import Any
 
 from connectors_common.dedup import find_best_match, prepare_candidates
 from connectors_common.fingerprint import content_fingerprint
-from connectors_common.identity import CandidateIdentity, resolve_canonical_id, store_identity_mappings
+from connectors_common.identity import (
+    CandidateIdentity,
+    resolve_canonical_id,
+    store_identity_mappings,
+)
 from connectors_common.mapping_store import MappingStore
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
 from connectors_common.enrichment import source_confidence, source_labels
@@ -24,7 +28,9 @@ from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.url_utils import canonicalize_url, url_hash
 from connectors_common.work import WorkTracker
 
-logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s"
+)
 logger = logging.getLogger(__name__)
 
 _URL_RE = re.compile(r"https?://[^\s<>\"]+")
@@ -52,7 +58,9 @@ def _split_authors(value: str | None) -> list[str]:
 
 
 def _select_opencti_token() -> str:
-    return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+    return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv(
+        "OPENCTI_ADMIN_TOKEN", ""
+    )
 
 
 def _author_key(prefix: str, source_url: str, name: str) -> str:
@@ -76,7 +84,9 @@ def fetch_documents(token: str, updated_after: str | None) -> list[dict[str, Any
         while True:
             if next_cursor:
                 params["pageCursor"] = next_cursor
-            response = client.get("https://readwise.io/api/v3/list/", params=params, headers=headers)
+            response = client.get(
+                "https://readwise.io/api/v3/list/", params=params, headers=headers
+            )
             response.raise_for_status()
             payload = response.json()
             documents.extend(payload.get("results", []))
@@ -119,7 +129,9 @@ def _published_from_doc(doc: Any) -> str | None:
 
 def _highlight_key(doc: Any, highlight: Any) -> str:
     parent_id = _doc_value(doc, "id") or _doc_value(doc, "parent_id") or ""
-    highlight_id = _doc_value(highlight, "id") or _doc_value(highlight, "highlight_id") or ""
+    highlight_id = (
+        _doc_value(highlight, "id") or _doc_value(highlight, "highlight_id") or ""
+    )
     if parent_id and highlight_id:
         return f"{parent_id}:{highlight_id}"
     if highlight_id:
@@ -132,12 +144,16 @@ def _highlight_key(doc: Any, highlight: Any) -> str:
     return hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
 
 
-def _format_highlight_note(value: Any, title: str, source_url: str, parent_id: str | None = None) -> str:
+def _format_highlight_note(
+    value: Any, title: str, source_url: str, parent_id: str | None = None
+) -> str:
     text = _doc_value(value, "text") or _doc_value(value, "highlighted_text") or ""
     note = _doc_value(value, "note") or ""
     location = _doc_value(value, "location") or ""
     location_type = _doc_value(value, "location_type") or ""
-    highlighted_at = _doc_value(value, "highlighted_at") or _doc_value(value, "created_at") or ""
+    highlighted_at = (
+        _doc_value(value, "highlighted_at") or _doc_value(value, "created_at") or ""
+    )
     lines = ["Readwise highlight"]
     if title:
         lines.append(f"Title: {title}")
@@ -188,7 +204,7 @@ class ReadwiseConnector:
     def __init__(self) -> None:
         self.token = os.getenv("READWISE_API_KEY", "")
         opencti_url = os.getenv("OPENCTI_URL", "http://opencti:8080")
-        admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+        os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
         opencti_token = _select_opencti_token()
         if not opencti_token:
             raise RuntimeError("readwise_missing_token")
@@ -223,13 +239,23 @@ class ReadwiseConnector:
         self.state = StateStore("/data/state.json")
         mapping_path = os.getenv("TI_MAPPING_DB", "/data/mapping/ti-mapping.sqlite")
         self.mapping = MappingStore(mapping_path)
-        self.allow_title_fallback = os.getenv("TI_ALLOW_TITLE_FALLBACK", "false").lower() == "true"
+        self.allow_title_fallback = (
+            os.getenv("TI_ALLOW_TITLE_FALLBACK", "false").lower() == "true"
+        )
         self.readwise_lookback_days = int(os.getenv("TI_READWISE_LOOKBACK_DAYS", "14"))
         link_strategy = os.getenv("TI_LINK_STRATEGY", "none").lower()
-        self.link_strategy = link_strategy if link_strategy in {"report", "reference_only", "none"} else "none"
+        self.link_strategy = (
+            link_strategy
+            if link_strategy in {"report", "reference_only", "none"}
+            else "none"
+        )
         default_confidence = os.getenv("TI_CONFIDENCE_IMPORT", "").strip()
-        self.default_confidence = int(default_confidence) if default_confidence else None
-        self.client = OpenCTIClient(opencti_url, opencti_token, fallback_token=self.fallback_token)
+        self.default_confidence = (
+            int(default_confidence) if default_confidence else None
+        )
+        self.client = OpenCTIClient(
+            opencti_url, opencti_token, fallback_token=self.fallback_token
+        )
 
     def _resolve_author(self, key: str, name: str, identity_type: str) -> str | None:
         if not key or not name:
@@ -265,14 +291,19 @@ class ReadwiseConnector:
             work = WorkTracker(self.helper, "Readwise import")
             updated_after = self.state.get("updated_after")
             if not updated_after and self.readwise_lookback_days > 0:
-                updated_after = (datetime.now(timezone.utc) - timedelta(days=self.readwise_lookback_days)).isoformat()
+                updated_after = (
+                    datetime.now(timezone.utc)
+                    - timedelta(days=self.readwise_lookback_days)
+                ).isoformat()
             approved_tags = fetch_approved_tags(self.briefing_url)
             if not approved_tags:
                 logger.info("readwise_no_approved_tags")
                 work.done("No approved tags")
                 run_state.skipped("no_approved_tags", **metrics)
                 return
-            recent_reports = self.client.list_reports_since(datetime.now(timezone.utc) - timedelta(days=self.dedup_days))
+            recent_reports = self.client.list_reports_since(
+                datetime.now(timezone.utc) - timedelta(days=self.dedup_days)
+            )
             candidates = prepare_candidates(recent_reports)
             documents = fetch_documents(self.token, updated_after)
             total_documents = len(documents)
@@ -290,7 +321,9 @@ class ReadwiseConnector:
                 if total_documents:
                     percent = int((idx / total_documents) * 100)
                     if percent >= last_progress + 5:
-                        work.progress(percent, f"processed_documents={idx}/{total_documents}")
+                        work.progress(
+                            percent, f"processed_documents={idx}/{total_documents}"
+                        )
                         last_progress = percent
                 updated_at = _doc_value(doc, "updated_at")
                 updated_iso = isoparse(updated_at).isoformat() if updated_at else None
@@ -318,13 +351,24 @@ class ReadwiseConnector:
                     or _doc_value(doc, "content")
                     or ""
                 )
-                full_text = format_readable_text(extract_main_text(full_text_input)) if full_text_input else ""
-                text_input = full_text_input or _doc_value(doc, "summary") or _doc_value(doc, "notes") or ""
+                full_text = (
+                    format_readable_text(extract_main_text(full_text_input))
+                    if full_text_input
+                    else ""
+                )
+                text_input = (
+                    full_text_input
+                    or _doc_value(doc, "summary")
+                    or _doc_value(doc, "notes")
+                    or ""
+                )
                 summary_text = _doc_value(doc, "summary") or ""
                 text = extract_main_text(text_input)
                 text = format_readable_text(text)
                 content_fp = content_fingerprint(text)
-                published = _doc_value(doc, "published") or _doc_value(doc, "created_at")
+                published = _doc_value(doc, "published") or _doc_value(
+                    doc, "created_at"
+                )
                 if published:
                     try:
                         published = isoparse(published).isoformat()
@@ -340,12 +384,16 @@ class ReadwiseConnector:
                         author_name = "; ".join(authors)
                         primary = authors[0]
                         author_key = _author_key("readwise", source_url, primary)
-                        author_id = self._resolve_author(author_key, primary, "Individual")
+                        author_id = self._resolve_author(
+                            author_key, primary, "Individual"
+                        )
                         if author_id:
                             author_ids.append(author_id)
                         for name in authors[1:]:
                             extra_key = _author_key("readwise", source_url, name)
-                            extra_id = self._resolve_author(extra_key, name, "Individual")
+                            extra_id = self._resolve_author(
+                                extra_key, name, "Individual"
+                            )
                             if extra_id:
                                 author_ids.append(extra_id)
                 if category == "article":
@@ -355,14 +403,20 @@ class ReadwiseConnector:
                 if category != "highlight":
                     title = _doc_value(doc, "title") or "Readwise document"
                 else:
-                    title = _doc_value(doc, "parent_title") or _doc_value(doc, "title") or "Readwise highlight"
+                    title = (
+                        _doc_value(doc, "parent_title")
+                        or _doc_value(doc, "title")
+                        or "Readwise highlight"
+                    )
                 external_ids: list[tuple[str, str]] = []
                 if doc_id is not None:
                     external_ids.append(("readwise_doc", str(doc_id)))
                 if source_url:
                     external_ids.append(("readwise_url", source_url))
                 if category == "highlight" and doc_id is not None:
-                    note_id = self.mapping.get_by_external_id("readwise_doc_note", str(doc_id))
+                    note_id = self.mapping.get_by_external_id(
+                        "readwise_doc_note", str(doc_id)
+                    )
                     if not note_id:
                         note_body = _format_highlight_note(doc, title, source_url)
                         if note_body:
@@ -430,7 +484,9 @@ class ReadwiseConnector:
                         match_reason or "created",
                     )
                     existing_url_owner = self.mapping.get_by_url_hash(url_digest)
-                    store_identity_mappings(self.mapping, report_id, "Report", candidate)
+                    store_identity_mappings(
+                        self.mapping, report_id, "Report", candidate
+                    )
                     should_add_ref = True
                     if url_digest:
                         should_add_ref = self.state.remember_hash(
@@ -445,24 +501,36 @@ class ReadwiseConnector:
                             url_digest or None,
                         )
                     for author_id in author_ids:
-                        self.client.create_relationship(report_id, author_id, "related-to")
+                        self.client.create_relationship(
+                            report_id, author_id, "related-to"
+                        )
                     if full_text:
                         existing_description = None
                         if not created_new:
-                            existing_description = self.client.get_report_description(report_id)
+                            existing_description = self.client.get_report_description(
+                                report_id
+                            )
                         if created_new:
                             existing_description = text
                         if existing_description is None:
                             existing_description = ""
                         existing_value = existing_description.strip()
                         full_value = full_text.strip()
-                        if full_value and full_value != existing_value and len(full_value) > len(existing_value) + 200:
+                        if (
+                            full_value
+                            and full_value != existing_value
+                            and len(full_value) > len(existing_value) + 200
+                        ):
                             self.client.update_report_description(report_id, full_value)
                     if summary_text and doc_id is not None:
-                        summary_value = format_readable_text(extract_main_text(summary_text))
+                        summary_value = format_readable_text(
+                            extract_main_text(summary_text)
+                        )
                         if summary_value:
                             external_id = f"{doc_id}:summary"
-                            existing_note = self.mapping.get_by_external_id("readwise_summary", external_id)
+                            existing_note = self.mapping.get_by_external_id(
+                                "readwise_summary", external_id
+                            )
                             if not existing_note:
                                 note_id = self.client.create_note(
                                     f"Readwise summary\n\n{summary_value}",
@@ -482,10 +550,14 @@ class ReadwiseConnector:
                     for highlight in highlights:
                         metrics["highlights_processed"] += 1
                         highlight_key = _highlight_key(doc, highlight)
-                        existing_note = self.mapping.get_by_external_id("readwise_highlight", highlight_key)
+                        existing_note = self.mapping.get_by_external_id(
+                            "readwise_highlight", highlight_key
+                        )
                         if existing_note:
                             continue
-                        note_body = _format_highlight_note(highlight, title, source_url, parent_id=doc_id)
+                        note_body = _format_highlight_note(
+                            highlight, title, source_url, parent_id=doc_id
+                        )
                         if note_body:
                             note_id = self.client.create_note(
                                 note_body,
@@ -505,7 +577,10 @@ class ReadwiseConnector:
                             max_seen_dt = isoparse(updated_iso)
                 else:
                     metrics["reports_failed"] += 1
-                    logger.info("report_skipped source=readwise reason=create_failed title=%s", title)
+                    logger.info(
+                        "report_skipped source=readwise reason=create_failed title=%s",
+                        title,
+                    )
                 metrics["documents_processed"] += 1
 
             if max_seen_dt:
@@ -523,6 +598,7 @@ class ReadwiseConnector:
             logger.exception("readwise_run_failed error=%s", exc)
             run_state.failure(str(exc), **metrics)
             raise
+
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):
             self.helper.schedule(self._run, self.interval)
@@ -531,7 +607,9 @@ class ReadwiseConnector:
             self._run()
             time.sleep(self.interval)
 
-    def _handle_extracted_links(self, report_id: str, text_input: str, highlights: list) -> None:
+    def _handle_extracted_links(
+        self, report_id: str, text_input: str, highlights: list
+    ) -> None:
         if self.link_strategy == "none":
             return
         urls = set()
@@ -552,7 +630,9 @@ class ReadwiseConnector:
             existing_id = self.mapping.get_by_url_hash(digest)
             if existing_id:
                 if existing_id != report_id and existing_id not in linked_ids:
-                    self.client.create_relationship(report_id, existing_id, "related-to")
+                    self.client.create_relationship(
+                        report_id, existing_id, "related-to"
+                    )
                     linked_ids.add(existing_id)
                 continue
             if self.link_strategy == "reference_only":
@@ -561,7 +641,9 @@ class ReadwiseConnector:
                     f"{report_id}:{digest}",
                 )
                 if should_add_ref:
-                    self.client.add_external_reference_to_report(report_id, "readwise", canonical, digest)
+                    self.client.add_external_reference_to_report(
+                        report_id, "readwise", canonical, digest
+                    )
                 continue
             if self.link_strategy == "report":
                 linked_id = self._resolve_or_create_linked_report(canonical)
@@ -571,7 +653,9 @@ class ReadwiseConnector:
 
     def _resolve_or_create_linked_report(self, url: str) -> str | None:
         candidate = CandidateIdentity(urls=[url])
-        report_id, _ = resolve_canonical_id(self.mapping, candidate, allow_title_fallback=False)
+        report_id, _ = resolve_canonical_id(
+            self.mapping, candidate, allow_title_fallback=False
+        )
         if report_id:
             return report_id
         title = url

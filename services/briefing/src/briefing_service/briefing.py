@@ -2,7 +2,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 

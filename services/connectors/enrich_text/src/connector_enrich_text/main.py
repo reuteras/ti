@@ -21,7 +21,9 @@ from connectors_common.state_store import StateStore
 from connectors_common.connector_state import ConnectorState
 from connectors_common.work import WorkTracker
 
-logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s"
+)
 logger = logging.getLogger(__name__)
 
 _PERSON_TITLES = {
@@ -52,7 +54,9 @@ _SOURCE_LABELS = ["source:enrich-text"]
 
 
 def _select_opencti_token() -> str:
-    return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+    return os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv(
+        "OPENCTI_ADMIN_TOKEN", ""
+    )
 
 
 def _observable_type_for_ip(value: str) -> str:
@@ -120,7 +124,9 @@ def _is_valid_person(name: str) -> bool:
 class EnrichTextConnector:
     def __init__(self) -> None:
         opencti_url = os.getenv("OPENCTI_URL", "http://opencti:8080")
-        admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+        admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv(
+            "OPENCTI_ADMIN_TOKEN", ""
+        )
         opencti_token = _select_opencti_token()
         if not opencti_token:
             raise RuntimeError("enrich_missing_token")
@@ -151,14 +157,20 @@ class EnrichTextConnector:
         self.interval = int(os.getenv("CONNECTOR_RUN_INTERVAL_SECONDS", "900"))
         self.lookback_days = int(os.getenv("ENRICH_LOOKBACK_DAYS", "7"))
         sources = os.getenv("TI_ENRICH_SOURCES", "miniflux,readwise,zotero")
-        self.allowed_sources = {part.strip().lower() for part in sources.split(",") if part.strip()}
+        self.allowed_sources = {
+            part.strip().lower() for part in sources.split(",") if part.strip()
+        }
         self.state = StateStore("/data/state.json")
-        self.client = OpenCTIClient(opencti_url, opencti_token, fallback_token=self.fallback_token)
+        self.client = OpenCTIClient(
+            opencti_url, opencti_token, fallback_token=self.fallback_token
+        )
 
     def _enrich_text(self, entity_id: str, text: str, state_prefix: str) -> None:
         if not text:
             return
-        summary_enabled = os.getenv("ENRICHMENT_SUMMARY_ENABLED", "false").lower() == "true"
+        summary_enabled = (
+            os.getenv("ENRICHMENT_SUMMARY_ENABLED", "false").lower() == "true"
+        )
         if state_prefix == "report" and summary_enabled:
             summary = summarize_text(text[:12000])
             if summary:
@@ -299,11 +311,16 @@ class EnrichTextConnector:
         if "all" in self.allowed_sources:
             return True
         for label in labels:
-            if label.startswith("source:") and label.split(":", 1)[1] in self.allowed_sources:
+            if (
+                label.startswith("source:")
+                and label.split(":", 1)[1] in self.allowed_sources
+            ):
                 return True
         return False
 
-    def _add_rule_notes(self, entity_id: str, state_prefix: str, rule_type: str, rules: list[str]) -> None:
+    def _add_rule_notes(
+        self, entity_id: str, state_prefix: str, rule_type: str, rules: list[str]
+    ) -> None:
         if not rules:
             return
         for idx, rule in enumerate(rules, start=1):
@@ -315,7 +332,9 @@ class EnrichTextConnector:
             if not self.state.remember_hash("enrich", seen_key):
                 continue
             title = f"{rule_type.upper()} rule {idx}"
-            content = f"{title}\n\nParent: {entity_id}\n\n```{rule_type}\n{rule_text}\n```"
+            content = (
+                f"{title}\n\nParent: {entity_id}\n\n```{rule_type}\n{rule_text}\n```"
+            )
             self.client.create_note(
                 content,
                 object_refs=[entity_id],
@@ -387,7 +406,9 @@ class EnrichTextConnector:
                         last_progress = percent
 
             self.state.set("last_run", datetime.now(timezone.utc).isoformat())
-            logger.info("enrich_run_completed reports=%s notes=%s", len(reports), len(notes))
+            logger.info(
+                "enrich_run_completed reports=%s notes=%s", len(reports), len(notes)
+            )
             work.log(f"processed={processed} skipped={metrics['items_skipped']}")
             work.done(f"processed={processed}")
             metrics["items_processed"] = processed
@@ -396,6 +417,7 @@ class EnrichTextConnector:
             logger.exception("enrich_run_failed error=%s", exc)
             run_state.failure(str(exc), **metrics)
             raise
+
     def run(self) -> None:
         if hasattr(self.helper, "schedule"):
             self.helper.schedule(self._run, self.interval)

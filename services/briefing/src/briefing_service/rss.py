@@ -25,9 +25,9 @@ def build_rss_feed(briefings: list[BriefingRecord], base_url: str) -> str:
 
     rss = "\n".join(
         [
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
-            f"<?xml-stylesheet type=\"text/xsl\" href=\"{escape(base_url)}/feeds/daily.xsl\"?>",
-            "<rss version=\"2.0\">",
+            '<?xml version="1.0" encoding="utf-8"?>',
+            f'<?xml-stylesheet type="text/xsl" href="{escape(base_url)}/feeds/daily.xsl"?>',
+            '<rss version="2.0">',
             "  <channel>",
             "    <title>Daily Briefings</title>",
             f"    <link>{escape(f'{base_url}/briefings/daily/today')}</link>",

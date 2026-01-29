@@ -20,7 +20,9 @@ class WorkTracker:
         work_api = getattr(api, "work", None)
         if work_api is None:
             return
-        connect_id = getattr(self._helper, "connect_id", None) or getattr(self._helper, "connector_id", None)
+        connect_id = getattr(self._helper, "connect_id", None) or getattr(
+            self._helper, "connector_id", None
+        )
         if not connect_id or not hasattr(work_api, "initiate_work"):
             self._work_api = work_api
             return

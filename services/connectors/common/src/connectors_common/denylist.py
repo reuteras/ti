@@ -47,10 +47,14 @@ def _parse_payload(payload: object) -> dict[str, set[str]]:
                     try:
                         patterns.append(re.compile(pattern, re.IGNORECASE))
                     except re.error as exc:
-                        logger.warning("denylist_pattern_invalid pattern=%s error=%s", pattern, exc)
+                        logger.warning(
+                            "denylist_pattern_invalid pattern=%s error=%s", pattern, exc
+                        )
                 data[key_norm] = patterns
             else:
-                data[key_norm] = {_normalize(str(item)) for item in value if str(item).strip()}
+                data[key_norm] = {
+                    _normalize(str(item)) for item in value if str(item).strip()
+                }
     return data
 
 

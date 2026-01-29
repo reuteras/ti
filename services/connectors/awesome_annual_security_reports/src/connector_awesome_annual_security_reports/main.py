@@ -13,10 +13,11 @@ from connectors_common.mapping_store import MappingStore
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
 from connectors_common.state_store import StateStore
 from connectors_common.connector_state import ConnectorState
-from connectors_common.text_utils import extract_main_text, format_readable_text
 from connectors_common.work import WorkTracker
 
-logging.basicConfig(level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="time=%(asctime)s level=%(levelname)s msg=%(message)s"
+)
 logger = logging.getLogger(__name__)
 
 PDF_ROOT = "Annual Security Reports"
@@ -82,8 +83,12 @@ def _github_headers(token: str | None) -> dict[str, str]:
 class AwesomeAnnualConnector:
     def __init__(self) -> None:
         opencti_url = os.getenv("OPENCTI_URL", "http://opencti:8080")
-        admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
-        opencti_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv("OPENCTI_ADMIN_TOKEN", "")
+        admin_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv(
+            "OPENCTI_ADMIN_TOKEN", ""
+        )
+        opencti_token = os.getenv("OPENCTI_APP__ADMIN__TOKEN") or os.getenv(
+            "OPENCTI_ADMIN_TOKEN", ""
+        )
         if not opencti_token:
             raise RuntimeError("awesome_annual_missing_token")
 
@@ -92,7 +97,9 @@ class AwesomeAnnualConnector:
             raise RuntimeError("awesome_annual_missing_connector_id")
         connector_name = os.getenv("CONNECTOR_NAME", "Awesome Annual Security Reports")
         connector_type = os.getenv("CONNECTOR_TYPE", "EXTERNAL_IMPORT")
-        connector_scope = os.getenv("CONNECTOR_SCOPE", "awesome-annual-security-reports")
+        connector_scope = os.getenv(
+            "CONNECTOR_SCOPE", "awesome-annual-security-reports"
+        )
         connector_log_level = os.getenv("CONNECTOR_LOG_LEVEL", "info")
 
         def _build_helper(token: str) -> OpenCTIConnectorHelper:
@@ -112,16 +119,24 @@ class AwesomeAnnualConnector:
         self.fallback_token = admin_token
         self.interval = int(os.getenv("CONNECTOR_RUN_INTERVAL_SECONDS", "21600"))
         self.owner = os.getenv("AWESOME_ASR_GITHUB_OWNER", "jacobdjwilson")
-        self.repo = os.getenv("AWESOME_ASR_GITHUB_REPO", "awesome-annual-security-reports")
+        self.repo = os.getenv(
+            "AWESOME_ASR_GITHUB_REPO", "awesome-annual-security-reports"
+        )
         self.ref = os.getenv("AWESOME_ASR_GITHUB_REF", "main")
         self.token = os.getenv("AWESOME_ASR_GITHUB_TOKEN", "")
-        self.max_markdown_bytes = int(os.getenv("AWESOME_ASR_MAX_MARKDOWN_BYTES", "2000000"))
+        self.max_markdown_bytes = int(
+            os.getenv("AWESOME_ASR_MAX_MARKDOWN_BYTES", "2000000")
+        )
         mapping_path = os.getenv("TI_MAPPING_DB", "/data/mapping/ti-mapping.sqlite")
         self.mapping = MappingStore(mapping_path)
         self.state = StateStore("/data/state.json")
-        self.client = OpenCTIClient(opencti_url, opencti_token, fallback_token=self.fallback_token)
+        self.client = OpenCTIClient(
+            opencti_url, opencti_token, fallback_token=self.fallback_token
+        )
 
-    def _github_get(self, client: httpx.Client, url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _github_get(
+        self, client: httpx.Client, url: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         headers = _github_headers(self.token or None)
         response = client.get(url, params=params, headers=headers, timeout=30)
         response.raise_for_status()
@@ -132,7 +147,9 @@ class AwesomeAnnualConnector:
         mds: dict[str, RepoFile] = {}
         api_base = f"https://api.github.com/repos/{self.owner}/{self.repo}"
         with httpx.Client() as client:
-            tree = self._github_get(client, f"{api_base}/git/trees/{self.ref}", {"recursive": "1"})
+            tree = self._github_get(
+                client, f"{api_base}/git/trees/{self.ref}", {"recursive": "1"}
+            )
             truncated = tree.get("truncated") is True
             if not truncated:
                 for entry in tree.get("tree", []):
@@ -141,20 +158,31 @@ class AwesomeAnnualConnector:
                         continue
                     size = entry.get("size")
                     sha = entry.get("sha")
-                    if path.startswith(f"{PDF_ROOT}/") and path.lower().endswith(".pdf"):
+                    if path.startswith(f"{PDF_ROOT}/") and path.lower().endswith(
+                        ".pdf"
+                    ):
                         pdfs[path] = RepoFile(path=path, sha=sha, size=size)
-                    elif path.startswith(f"{MD_ROOT}/") and path.lower().endswith(".md"):
+                    elif path.startswith(f"{MD_ROOT}/") and path.lower().endswith(
+                        ".md"
+                    ):
                         mds[path] = RepoFile(path=path, sha=sha, size=size)
                 return pdfs, mds
 
             root_tree = self._github_get(client, f"{api_base}/git/trees/{self.ref}")
-            roots = {entry.get("path"): entry.get("sha") for entry in root_tree.get("tree", [])}
+            roots = {
+                entry.get("path"): entry.get("sha")
+                for entry in root_tree.get("tree", [])
+            }
             pdf_root_sha = roots.get(PDF_ROOT)
             md_root_sha = roots.get(MD_ROOT)
             if pdf_root_sha:
-                pdfs.update(self._walk_tree(client, api_base, PDF_ROOT, pdf_root_sha, ".pdf"))
+                pdfs.update(
+                    self._walk_tree(client, api_base, PDF_ROOT, pdf_root_sha, ".pdf")
+                )
             if md_root_sha:
-                mds.update(self._walk_tree(client, api_base, MD_ROOT, md_root_sha, ".md"))
+                mds.update(
+                    self._walk_tree(client, api_base, MD_ROOT, md_root_sha, ".md")
+                )
         return pdfs, mds
 
     def _walk_tree(
@@ -184,14 +212,18 @@ class AwesomeAnnualConnector:
                     continue
                 if not full_path.lower().endswith(suffix):
                     continue
-                results[full_path] = RepoFile(path=full_path, sha=entry_sha, size=entry.get("size"))
+                results[full_path] = RepoFile(
+                    path=full_path, sha=entry_sha, size=entry.get("size")
+                )
         return results
 
     def _download_markdown(self, path: str, entry: RepoFile | None) -> str:
         if not entry:
             return ""
         if entry.size is not None and entry.size > self.max_markdown_bytes:
-            logger.warning("awesome_annual_markdown_too_large path=%s size=%s", path, entry.size)
+            logger.warning(
+                "awesome_annual_markdown_too_large path=%s size=%s", path, entry.size
+            )
             return ""
         url = f"https://raw.githubusercontent.com/{self.owner}/{self.repo}/{self.ref}/{path}"
         headers = _github_headers(self.token or None)
@@ -201,12 +233,16 @@ class AwesomeAnnualConnector:
             return response.text
 
     def _ensure_external_refs(self, report_id: str, pdf_path: str, sha: str) -> None:
-        blob_url = f"https://github.com/{self.owner}/{self.repo}/blob/{self.ref}/{pdf_path}"
+        blob_url = (
+            f"https://github.com/{self.owner}/{self.repo}/blob/{self.ref}/{pdf_path}"
+        )
         raw_url = f"https://raw.githubusercontent.com/{self.owner}/{self.repo}/{self.ref}/{pdf_path}"
         for url in (blob_url, raw_url):
             if not self.state.remember_hash("external_ref", f"{report_id}:{url}"):
                 continue
-            self.client.add_external_reference_to_report(report_id, "github", url, f"{pdf_path}@{sha}")
+            self.client.add_external_reference_to_report(
+                report_id, "github", url, f"{pdf_path}@{sha}"
+            )
 
     def _process_pdf(
         self,
@@ -220,7 +256,9 @@ class AwesomeAnnualConnector:
             return
 
         report_id = self.mapping.get_by_external_id("awesome_annual_report", pdf_path)
-        markdown_text = self._download_markdown(md_entry.path, md_entry) if md_entry else ""
+        markdown_text = (
+            self._download_markdown(md_entry.path, md_entry) if md_entry else ""
+        )
         description = ""
         if markdown_text:
             description = _first_paragraph(markdown_text)
@@ -247,7 +285,9 @@ class AwesomeAnnualConnector:
             if not report_id:
                 logger.warning("awesome_annual_report_create_failed path=%s", pdf_path)
                 return
-            self.mapping.upsert_external_id("awesome_annual_report", pdf_path, report_id, "Report")
+            self.mapping.upsert_external_id(
+                "awesome_annual_report", pdf_path, report_id, "Report"
+            )
         else:
             if markdown_text:
                 self.client.update_report_description(report_id, description)
@@ -256,16 +296,23 @@ class AwesomeAnnualConnector:
 
         if markdown_text and md_entry:
             note_key = f"{pdf_path}:{md_entry.sha}"
-            existing_note = self.mapping.get_by_external_id("awesome_annual_md", note_key)
+            existing_note = self.mapping.get_by_external_id(
+                "awesome_annual_md", note_key
+            )
             if not existing_note:
                 note_text = "Markdown conversion (AI-generated)\n\n" + markdown_text
                 note_id = self.client.create_note(
                     note_text,
                     object_refs=[report_id],
-                    labels=["source:awesome-annual-security-reports", "format:markdown"],
+                    labels=[
+                        "source:awesome-annual-security-reports",
+                        "format:markdown",
+                    ],
                 )
                 if note_id:
-                    self.mapping.upsert_external_id("awesome_annual_md", note_key, note_id, "Note")
+                    self.mapping.upsert_external_id(
+                        "awesome_annual_md", note_key, note_id, "Note"
+                    )
 
         state_map[pdf_path] = pdf_sha
 
@@ -298,7 +345,9 @@ class AwesomeAnnualConnector:
             self._process_pdf(pdf_entry, md_entry, state_map)
             updated += 1
             if idx % 25 == 0:
-                work.progress(int((idx / max(1, len(pdfs))) * 100), f"processed={idx}/{len(pdfs)}")
+                work.progress(
+                    int((idx / max(1, len(pdfs))) * 100), f"processed={idx}/{len(pdfs)}"
+                )
 
         self.state.set("pdf_sha_map", state_map)
         self.state.set("last_run", datetime.now(timezone.utc).isoformat())
