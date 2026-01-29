@@ -40,4 +40,3 @@ jobs:
           VALIDATE_PYTHON_PYLINT: false
           VALIDATE_SHELL_SHFMT: false
           VALIDATE_YAML_PRETTIER: false
-          HADOLINT_CONFIG_FILE: .hadolint.yaml

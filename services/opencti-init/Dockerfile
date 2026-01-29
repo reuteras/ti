@@ -6,6 +6,7 @@ ENV PYTHONUNBUFFERED=1
 
 RUN addgroup --system app && adduser --system --ingroup app app
 
+# hadolint ignore=DL3013
 RUN pip install --no-cache-dir httpx
 
 COPY --chown=app:app opencti_init.py /app/opencti_init.py

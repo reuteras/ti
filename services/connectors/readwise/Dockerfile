@@ -4,6 +4,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends git libmagic1 && \
     rm -rf /var/lib/apt/lists/*
 
@@ -12,6 +13,7 @@ RUN addgroup --system app && adduser --system --ingroup app app
 COPY --chown=app:app common /app/common
 COPY --chown=app:app readwise /app/readwise
 
+# hadolint ignore=DL3013
 RUN pip install --no-cache-dir uv && \
     uv pip install --system --no-cache /app/common && \
     uv pip install --system --no-cache /app/readwise
