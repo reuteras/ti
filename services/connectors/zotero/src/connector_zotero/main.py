@@ -22,6 +22,7 @@ from connectors_common.identity import (
 from connectors_common.mapping_store import MappingStore
 from connectors_common.opencti_client import OpenCTIClient, ReportInput
 from connectors_common.enrichment import source_confidence, source_labels
+from connectors_common.llm import summarize_text
 from connectors_common.state_store import StateStore
 from connectors_common.connector_state import ConnectorState
 from connectors_common.denylist import filter_values
@@ -56,6 +57,31 @@ def _split_authors(value: str | None) -> list[str]:
     parts = [part.strip() for part in re.split(r"[;,]", value) if part.strip()]
     candidates = parts or [value.strip()]
     return filter_values(candidates, "persons")
+
+
+def _tag_matches(approved_tags: set[str], tag_values: set[str]) -> bool:
+    if not approved_tags or not tag_values:
+        return False
+    normalized = {tag.strip().strip("/") for tag in approved_tags if tag.strip()}
+    if not normalized:
+        return False
+    for tag in tag_values:
+        if tag in normalized:
+            return True
+        for prefix in normalized:
+            if tag.startswith(f"{prefix}/"):
+                return True
+    return False
+
+
+def _fallback_description_from_fulltext(text: str) -> str:
+    if not text:
+        return ""
+    snippet = text[:4000]
+    summary = summarize_text(snippet)
+    if summary:
+        return summary
+    return snippet
 
 
 def _select_opencti_token() -> str:
@@ -163,12 +189,7 @@ def fetch_attachment_fulltext(
 
 
 def normalize_fulltext(text: str) -> str:
-    if not text:
-        return ""
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    normalized = "\n".join(line.rstrip() for line in normalized.split("\n"))
-    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
-    return normalized
+    return text or ""
 
 
 def fetch_approved_tags(briefing_url: str) -> set[str]:
@@ -322,7 +343,7 @@ class ZoteroConnector:
             return True
         tag_values, collection_values = self._extract_tags_and_collections(data)
         return bool(
-            tag_values.intersection(approved_tags)
+            _tag_matches(approved_tags, tag_values)
             or collection_values.intersection(approved_collections)
         )
 
@@ -683,6 +704,7 @@ class ZoteroConnector:
                 continue
 
             report_id = self.mapping.get_by_external_id("zotero_item", str(parent_key))
+            parent_data = None
             if not report_id:
                 parent_item = fetch_item_by_key(self.zotero, parent_key)
                 if not parent_item:
@@ -698,6 +720,10 @@ class ZoteroConnector:
                 )
             if not report_id:
                 continue
+            if parent_data is None:
+                parent_item = fetch_item_by_key(self.zotero, parent_key)
+                if parent_item:
+                    parent_data = parent_item.get("data", {})
 
             attachment_title = (
                 data.get("title")
@@ -705,11 +731,31 @@ class ZoteroConnector:
                 or f"Attachment {attachment_key}"
             )
             content_body = normalized[: self.note_max_chars]
-            updated = self.client.update_report_description(report_id, content_body)
+            updated = self.client.update_report_content(report_id, content_body)
             if not updated:
                 logger.warning(
-                    "zotero_fulltext_description_update_failed report_id=%s", report_id
+                    "zotero_fulltext_content_update_failed report_id=%s", report_id
                 )
+            if parent_data is not None:
+                abstract = extract_main_text(parent_data.get("abstractNote") or "")
+                abstract = format_readable_text(abstract)
+                if not abstract.strip():
+                    fallback = _fallback_description_from_fulltext(normalized)
+                    if fallback:
+                        desc_hash = hashlib.sha256(
+                            fallback.encode("utf-8")
+                        ).hexdigest()
+                        if self.state.remember_hash(
+                            "zotero_fulltext_desc", f"{report_id}:{desc_hash}"
+                        ):
+                            updated_desc = self.client.update_report_description(
+                                report_id, fallback
+                            )
+                            if not updated_desc:
+                                logger.warning(
+                                    "zotero_fulltext_description_update_failed report_id=%s",
+                                    report_id,
+                                )
             artifact_id = self.client.create_artifact(
                 content_hash,
                 name=attachment_title,

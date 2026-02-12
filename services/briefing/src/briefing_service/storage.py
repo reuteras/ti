@@ -125,12 +125,23 @@ class Storage:
                 CREATE TABLE IF NOT EXISTS zotero_collection (
                     collection_id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
+                    parent_id TEXT,
                     approved INTEGER NOT NULL DEFAULT 0,
                     last_seen_at TEXT NOT NULL
                 )
                 """
             )
+            self._ensure_column(cursor, "zotero_collection", "parent_id", "TEXT")
             self._commit()
+
+    def _ensure_column(
+        self, cursor: sqlite3.Cursor, table: str, column: str, col_type: str
+    ) -> None:
+        cursor.execute(f"PRAGMA table_info({table})")
+        columns = {row[1] for row in cursor.fetchall()}
+        if column in columns:
+            return
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
     def get_state(self, key: str) -> Optional[str]:
         cursor = self.conn.cursor()
@@ -365,21 +376,23 @@ class Storage:
         return [row["tag"] for row in rows]
 
     def upsert_zotero_collection(
-        self, collection_id: str, name: str, approved: bool
+        self, collection_id: str, name: str, approved: bool, parent_id: str | None
     ) -> None:
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO zotero_collection(collection_id, name, approved, last_seen_at)
-                VALUES(?, ?, ?, ?)
+                INSERT INTO zotero_collection(collection_id, name, parent_id, approved, last_seen_at)
+                VALUES(?, ?, ?, ?, ?)
                 ON CONFLICT(collection_id) DO UPDATE SET
                     name=excluded.name,
+                    parent_id=excluded.parent_id,
                     last_seen_at=excluded.last_seen_at
                 """,
                 (
                     collection_id,
                     name,
+                    parent_id,
                     1 if approved else 0,
                     datetime.now(timezone.utc).isoformat(),
                 ),
@@ -406,6 +419,67 @@ class Storage:
             for row in rows
         ]
 
+    def list_zotero_collections_with_parent(
+        self,
+    ) -> list[tuple[str, str, str | None, bool, str]]:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT collection_id, name, parent_id, approved, last_seen_at
+            FROM zotero_collection
+            ORDER BY approved ASC, last_seen_at DESC, name ASC
+            """
+        )
+        rows = cursor.fetchall()
+        return [
+            (
+                row["collection_id"],
+                row["name"],
+                row["parent_id"],
+                bool(row["approved"]),
+                row["last_seen_at"] or "",
+            )
+            for row in rows
+        ]
+
+    def _zotero_parent_map(self) -> dict[str, str]:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT collection_id, parent_id
+            FROM zotero_collection
+            WHERE parent_id IS NOT NULL AND parent_id != ''
+            """
+        )
+        rows = cursor.fetchall()
+        return {row["collection_id"]: row["parent_id"] for row in rows}
+
+    def approve_zotero_collection_with_children(self, collection_id: str) -> None:
+        if not collection_id:
+            return
+        parent_map = self._zotero_parent_map()
+        children_map: dict[str, list[str]] = {}
+        for child_id, parent_id in parent_map.items():
+            children_map.setdefault(parent_id, []).append(child_id)
+        to_visit = [collection_id]
+        approved = set()
+        while to_visit:
+            current = to_visit.pop()
+            if current in approved:
+                continue
+            approved.add(current)
+            for child in children_map.get(current, []):
+                if child not in approved:
+                    to_visit.append(child)
+        if not approved:
+            return
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.executemany(
+                "UPDATE zotero_collection SET approved = 1 WHERE collection_id = ?",
+                [(cid,) for cid in approved],
+            )
+            self._commit()
     def set_zotero_collection_approved(
         self, collection_id: str, approved: bool
     ) -> None:

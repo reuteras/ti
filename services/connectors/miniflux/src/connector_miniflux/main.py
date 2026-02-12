@@ -424,6 +424,8 @@ class MinifluxConnector:
                             report.title,
                             match_reason or "created",
                         )
+                        if labels:
+                            self.client.add_labels(report_id, labels)
                         existing_url_owner = self.mapping.get_by_url_hash(url_digest)
                         store_identity_mappings(
                             self.mapping, report_id, "Report", candidate

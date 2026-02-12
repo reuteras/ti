@@ -120,7 +120,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for collection_id, name, approved, _ in collections %}
+            {% for collection_id, name, approved, _, depth in collections %}
               <tr>
                 <td>
                   {% if approved %}
@@ -129,7 +129,9 @@
                     <span class="status pending">Pending</span>
                   {% endif %}
                 </td>
-                <td>{{ name }}</td>
+                <td style="padding-left: calc(10px + {{ depth * 18 }}px);">
+                  {% if depth > 0 %}&#8627; {% endif %}{{ name }}
+                </td>
                 <td class="actions">
                   {% if approved %}
                     <form method="post" action="/zotero/collections/reject">

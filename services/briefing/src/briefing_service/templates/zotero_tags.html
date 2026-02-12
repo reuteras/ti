@@ -110,6 +110,11 @@
         </form>
         <span class="count">Total tags: {{ tags|length }}</span>
       </div>
+      {% if helper_text %}
+        <div class="panel" style="margin-bottom: 16px; color: var(--muted); font-size: 0.9rem;">
+          {{ helper_text }}
+        </div>
+      {% endif %}
       <div class="panel">
         <table>
           <thead>

@@ -195,9 +195,21 @@ def fetch_approved_tags(briefing_url: str) -> set[str]:
     if payload is None:
         return set()
     try:
-        return {str(tag) for tag in payload if str(tag).strip()}
+        return {str(tag).strip().strip("/") for tag in payload if str(tag).strip()}
     except Exception:
         return set()
+
+
+def _tag_matches(approved_tags: set[str], tag_values: set[str]) -> bool:
+    if not approved_tags or not tag_values:
+        return False
+    for tag in tag_values:
+        if tag in approved_tags:
+            return True
+        for prefix in approved_tags:
+            if tag.startswith(f"{prefix}/"):
+                return True
+    return False
 
 
 class ReadwiseConnector:
@@ -331,7 +343,7 @@ class ReadwiseConnector:
                 parent_id = _doc_value(doc, "parent_id")
                 if not doc_tags and parent_id:
                     doc_tags = tag_cache.get(str(parent_id), set())
-                if not doc_tags.intersection(approved_tags):
+                if not _tag_matches(approved_tags, doc_tags):
                     logger.info(
                         "report_skipped source=readwise reason=tag_not_approved title=%s",
                         _doc_value(doc, "title") or "Readwise document",

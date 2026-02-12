@@ -431,7 +431,10 @@ async def readwise_tags() -> str:
         return "<html><body>Storage not ready</body></html>"
     tags = storage.list_readwise_tags()
     template = env.get_template("readwise_tags.html")
-    return template.render(tags=tags)
+    return template.render(
+        tags=tags,
+        helper_text="Approving a tag also approves all tags with the same prefix (e.g., security/ matches security/*).",
+    )
 
 
 @app.get("/readwise/tags/approved.json")
@@ -476,16 +479,40 @@ async def zotero_tags() -> str:
         return "<html><body>Storage not ready</body></html>"
     tags = storage.list_zotero_tags()
     template = env.get_template("zotero_tags.html")
-    return template.render(tags=tags)
+    return template.render(
+        tags=tags,
+        helper_text="Approving a tag also approves all tags with the same prefix (e.g., security/ matches security/*).",
+    )
 
 
 @app.get("/zotero/collections", response_class=HTMLResponse)
 async def zotero_collections() -> str:
     if storage is None:
         return "<html><body>Storage not ready</body></html>"
-    collections = storage.list_zotero_collections()
+    raw_collections = storage.list_zotero_collections_with_parent()
+    children_map: dict[str | None, list[tuple[str, str, str | None, bool, str]]] = {}
+    for item in raw_collections:
+        collection_id, name, parent_id, approved, last_seen_at = item
+        normalized_parent = parent_id or None
+        children_map.setdefault(normalized_parent, []).append(
+            (collection_id, name, normalized_parent, approved, last_seen_at)
+        )
+    for items in children_map.values():
+        items.sort(key=lambda row: row[1].lower())
+    ordered: list[tuple[str, str, bool, str, int]] = []
+
+    def _walk(parent_id: str | None, depth: int) -> None:
+        for item in children_map.get(parent_id, []):
+            collection_id, name, _, approved, last_seen_at = item
+            ordered.append((collection_id, name, approved, last_seen_at, depth))
+            _walk(collection_id, depth + 1)
+
+    _walk(None, 0)
+    if not ordered and raw_collections:
+        for collection_id, name, _, approved, last_seen_at in raw_collections:
+            ordered.append((collection_id, name, approved, last_seen_at, 0))
     template = env.get_template("zotero_collections.html")
-    return template.render(collections=collections)
+    return template.render(collections=ordered)
 
 
 @app.get("/zotero/tags/approved.json")
@@ -544,7 +571,7 @@ async def zotero_collection_approve(request: Request) -> RedirectResponse:
         form = await request.form()
         collection_id = (form.get("collection_id") or "").strip()
         if collection_id:
-            storage.set_zotero_collection_approved(collection_id, True)
+            storage.approve_zotero_collection_with_children(collection_id)
     return RedirectResponse("/zotero/collections", status_code=303)
 
 

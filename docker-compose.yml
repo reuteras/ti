@@ -1,7 +1,25 @@
 ---
 services:
+  volume-init:
+    image: alpine:latest
+    command:
+      - "sh"
+      - "-c"
+      - "chown -R 100:101 /data/briefing /data/readwise /data/enrich-text /data/cvelist /data/zotero /data/miniflux /data/mapping"
+    volumes:
+      - briefing-data:/data/briefing
+      - readwise-state:/data/readwise
+      - enrich-text-state:/data/enrich-text
+      - cvelist-state:/data/cvelist
+      - zotero-state:/data/zotero
+      - miniflux-state:/data/miniflux
+      - mapping-data:/data/mapping
+    restart: "no"
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.9
+    labels:
+      - com.monitoring.enable=true
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -16,6 +34,8 @@ services:
 
   minio:
     image: minio/minio:RELEASE.2025-06-13T11-33-47Z
+    labels:
+      - com.monitoring.enable=true
     command: server /data
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
@@ -30,6 +50,8 @@ services:
 
   redis:
     image: redis:8.4.0
+    labels:
+      - com.monitoring.enable=true
     volumes:
       - redis-data:/data
     healthcheck:
@@ -40,6 +62,8 @@ services:
 
   rabbitmq:
     image: rabbitmq:4.2-management
+    labels:
+      - com.monitoring.enable=true
     ulimits:
       nofile:
         soft: 65536
@@ -58,6 +82,8 @@ services:
 
   postgres:
     image: postgres:15
+    labels:
+      - com.monitoring.enable=true
     environment:
       - POSTGRES_USER=opencti
       - POSTGRES_PASSWORD=opencti
@@ -72,6 +98,8 @@ services:
 
   opencti:
     image: opencti/platform:latest
+    labels:
+      - com.monitoring.enable=true
     env_file:
       - .env
     environment:
@@ -110,7 +138,7 @@ services:
       minio:
         condition: service_healthy
     ports:
-      - "${OPENCTI_APP_PORT:-8080}:8080"
+      - "127.0.0.1:${OPENCTI_APP_PORT:-8080}:8080"
     volumes:
       - opencti-data:/data
     healthcheck:
@@ -121,6 +149,8 @@ services:
 
   opencti-worker:
     image: opencti/worker:latest
+    labels:
+      - com.monitoring.enable=true
     env_file:
       - .env
     environment:
@@ -155,6 +185,8 @@ services:
   briefing:
     build:
       context: services/briefing
+    labels:
+      - com.monitoring.enable=true
     env_file:
       - .env
     environment:
@@ -173,10 +205,12 @@ services:
       - ZOTERO_LIBRARY_ID=${ZOTERO_LIBRARY_ID}
       - ZOTERO_LIBRARY_TYPE=${ZOTERO_LIBRARY_TYPE:-user}
     ports:
-      - "8088:8088"
+      - "127.0.0.1:8088:8088"
     volumes:
       - briefing-data:/data
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       opencti:
         condition: service_healthy
     healthcheck:
@@ -189,6 +223,8 @@ services:
     build:
       context: services/connectors
       dockerfile: miniflux/Dockerfile
+    labels:
+      - com.monitoring.enable=true
     env_file:
       - .env
     environment:
@@ -210,6 +246,8 @@ services:
       - mapping-data:/data/mapping
     restart: unless-stopped
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       opencti:
         condition: service_healthy
       briefing:
@@ -224,6 +262,8 @@ services:
     build:
       context: services/connectors
       dockerfile: readwise/Dockerfile
+    labels:
+      - com.monitoring.enable=true
     env_file:
       - .env
     environment:
@@ -244,6 +284,8 @@ services:
       - mapping-data:/data/mapping
     restart: unless-stopped
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       opencti:
         condition: service_healthy
       briefing:
@@ -258,6 +300,8 @@ services:
     build:
       context: services/connectors
       dockerfile: zotero/Dockerfile
+    labels:
+      - com.monitoring.enable=true
     env_file:
       - .env
     environment:
@@ -280,6 +324,8 @@ services:
       - mapping-data:/data/mapping
     restart: unless-stopped
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       opencti:
         condition: service_healthy
       briefing:
@@ -294,6 +340,8 @@ services:
     build:
       context: services/connectors
       dockerfile: enrich_text/Dockerfile
+    labels:
+      - com.monitoring.enable=true
     env_file:
       - .env
     environment:
@@ -319,6 +367,8 @@ services:
       - enrich-text-state:/data
     restart: unless-stopped
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       opencti:
         condition: service_healthy
     healthcheck:
@@ -329,6 +379,8 @@ services:
 
   ollama:
     image: ollama/ollama:latest
+    labels:
+      - com.monitoring.enable=true
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
     volumes:
@@ -348,6 +400,8 @@ services:
     build:
       context: services/connectors
       dockerfile: cvelist/Dockerfile
+    labels:
+      - com.monitoring.enable=true
     env_file:
       - .env
     environment:
@@ -363,10 +417,17 @@ services:
       - CVELIST_REPO_URL=${CVELIST_REPO_URL:-https://github.com/CVEProject/cvelistV5.git}
       - CVELIST_BRANCH=${CVELIST_BRANCH:-main}
       - CONNECTOR_RUN_INTERVAL_SECONDS=${CVELIST_RUN_INTERVAL_SECONDS:-3600}
+      - HOME=/data
+    command:
+      - "sh"
+      - "-c"
+      - "git config --global --add safe.directory /data/cvelistV5 && exec python -m connector_cvelist.main"
     volumes:
       - cvelist-state:/data
     restart: unless-stopped
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       opencti:
         condition: service_healthy
     healthcheck:
@@ -433,37 +494,37 @@ services:
       opencti:
         condition: service_healthy
 
-  connector-alienvault:
-    image: opencti/connector-alienvault:latest
-    env_file:
-      - .env
-    environment:
-      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
-      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
-      - CONNECTOR_ID=${ALIENVAULT_CONNECTOR_ID}
-      - CONNECTOR_TYPE=EXTERNAL_IMPORT
-      - CONNECTOR_NAME=AlienVault
-      - CONNECTOR_SCOPE=alienvault
-      - CONNECTOR_LOG_LEVEL=info
-      - CONNECTOR_DURATION_PERIOD=PT10M
-      - ALIENVAULT_BASE_URL=${ALIENVAULT_BASE_URL:-https://otx.alienvault.com}
-      - ALIENVAULT_API_KEY=${ALIENVAULT_API_KEY}
-      - ALIENVAULT_TLP=White
-      - ALIENVAULT_CREATE_OBSERVABLES=true
-      - ALIENVAULT_CREATE_INDICATORS=true
-      - ALIENVAULT_PULSE_START_TIMESTAMP=${ALIENVAULT_PULSE_START_TIMESTAMP:-2025-01-01T00:00:00}
-      - ALIENVAULT_REPORT_TYPE=threat-report
-      - ALIENVAULT_REPORT_STATUS=New
-      - ALIENVAULT_GUESS_MALWARE=false
-      - ALIENVAULT_GUESS_CVE=false
-      - ALIENVAULT_EXCLUDED_PULSE_INDICATOR_TYPES=FileHash-MD5,FileHash-SHA1
-      - ALIENVAULT_ENABLE_RELATIONSHIPS=true
-      - ALIENVAULT_ENABLE_ATTACK_PATTERNS_INDICATES=true
-      - ALIENVAULT_DEFAULT_X_OPENCTI_SCORE=50
-    restart: unless-stopped
-    depends_on:
-      opencti:
-        condition: service_healthy
+#  connector-alienvault:
+#    image: opencti/connector-alienvault:latest
+#    env_file:
+#      - .env
+#    environment:
+#      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+#      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+#      - CONNECTOR_ID=${ALIENVAULT_CONNECTOR_ID}
+#      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+#      - CONNECTOR_NAME=AlienVault
+#      - CONNECTOR_SCOPE=alienvault
+#      - CONNECTOR_LOG_LEVEL=info
+#      - CONNECTOR_DURATION_PERIOD=PT10M
+#      - ALIENVAULT_BASE_URL=${ALIENVAULT_BASE_URL:-https://otx.alienvault.com}
+#      - ALIENVAULT_API_KEY=${ALIENVAULT_API_KEY}
+#      - ALIENVAULT_TLP=White
+#      - ALIENVAULT_CREATE_OBSERVABLES=true
+#      - ALIENVAULT_CREATE_INDICATORS=true
+#      - ALIENVAULT_PULSE_START_TIMESTAMP=${ALIENVAULT_PULSE_START_TIMESTAMP:-2025-07-01T00:00:00}
+#      - ALIENVAULT_REPORT_TYPE=threat-report
+#      - ALIENVAULT_REPORT_STATUS=New
+#      - ALIENVAULT_GUESS_MALWARE=false
+#      - ALIENVAULT_GUESS_CVE=false
+#      - ALIENVAULT_EXCLUDED_PULSE_INDICATOR_TYPES=FileHash-MD5,FileHash-SHA1
+#      - ALIENVAULT_ENABLE_RELATIONSHIPS=true
+#      - ALIENVAULT_ENABLE_ATTACK_PATTERNS_INDICATES=true
+#      - ALIENVAULT_DEFAULT_X_OPENCTI_SCORE=50
+#    restart: unless-stopped
+#    depends_on:
+#      opencti:
+#        condition: service_healthy
 
   connector-urlhaus:
     image: opencti/connector-urlhaus:latest
@@ -677,6 +738,34 @@ services:
       opencti:
         condition: service_healthy
 
+  connector-misp-feed-rosti:
+    image: opencti/connector-misp-feed:latest
+    env_file:
+      - .env
+    environment:
+      - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
+      - CONNECTOR_ID=${MISP_FEED_ROSTI_CONNECTOR_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=MISP Feed Rosti
+      - CONNECTOR_SCOPE=misp-feed
+      - CONNECTOR_LOG_LEVEL=info
+      - CONNECTOR_DURATION_PERIOD=PT1H
+      - MISP_FEED_SOURCE_TYPE=url
+      - MISP_FEED_URL=${MISP_FEED_ROSTI_URL}
+      - MISP_FEED_SSL_VERIFY=true
+      - MISP_FEED_IMPORT_FROM_DATE=${MISP_FEED_IMPORT_FROM_DATE}
+      - MISP_FEED_CREATE_REPORTS=true
+      - MISP_FEED_REPORT_TYPE=misp-event
+      - MISP_FEED_CREATE_INDICATORS=true
+      - MISP_FEED_CREATE_OBSERVABLES=true
+      - MISP_FEED_CREATE_OBJECT_OBSERVABLES=true
+      - MISP_FEED_CREATE_TAGS_AS_LABELS=true
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+
   connector-first-epss:
     image: opencti/connector-first-epss:latest
     env_file:
@@ -780,6 +869,8 @@ services:
     build:
       context: services/connectors
       dockerfile: awesome_annual_security_reports/Dockerfile
+    labels:
+      - com.monitoring.enable=true
     env_file:
       - .env
     environment:

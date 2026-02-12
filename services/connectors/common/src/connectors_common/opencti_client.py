@@ -66,6 +66,38 @@ class OpenCTIClient:
         self._software_checked = False
         self._country_supported = True
         self._label_cache: dict[str, str] = {}
+        self._missing_ids: dict[str, float] = {}
+        self._introspection_disabled = False
+
+    def _remember_missing(self, object_id: str, ttl_seconds: int = 3600) -> None:
+        self._missing_ids[object_id] = time.time() + ttl_seconds
+
+    def _is_missing(self, object_id: str) -> bool:
+        if object_id in self._missing_ids:
+            if self._missing_ids[object_id] > time.time():
+                return True
+            self._missing_ids.pop(object_id, None)
+        return False
+
+    def _stix_core_object_exists(self, object_id: str) -> bool:
+        if not self.admin_token or not object_id:
+            return False
+        if self._is_missing(object_id):
+            return False
+        query = """
+        query StixCoreObject($id: String!) {
+          stixCoreObject(id: $id) { id }
+        }
+        """
+        try:
+            data = self._post(query, {"id": object_id})
+        except Exception:
+            return True
+        node = data.get("stixCoreObject") if isinstance(data, dict) else None
+        if not node or not node.get("id"):
+            self._remember_missing(object_id)
+            return False
+        return True
 
     def _post_with_token(
         self, token: str, query: str, variables: dict[str, Any]
@@ -264,6 +296,10 @@ class OpenCTIClient:
         ]
         for mutation in mutations:
             try:
+                if "stixDomainObjectEdit" in mutation and not self._stix_core_object_exists(
+                    report_id
+                ):
+                    return
                 self._post(mutation, {"id": report_id, "input": patch})
                 return
             except Exception as exc:
@@ -274,6 +310,8 @@ class OpenCTIClient:
 
     def add_labels(self, object_id: str, labels: list[str]) -> bool:
         if not self.admin_token or not object_id or not labels:
+            return False
+        if not self._stix_core_object_exists(object_id):
             return False
         label_ids = self._ensure_label_ids(labels)
         if not label_ids:
@@ -331,6 +369,48 @@ class OpenCTIClient:
         ]
         for mutation in mutations:
             try:
+                if "stixDomainObjectEdit" in mutation and not self._stix_core_object_exists(
+                    report_id
+                ):
+                    return False
+                self._post(mutation, {"id": report_id, "input": patch})
+                return True
+            except Exception:
+                continue
+        return False
+
+    def update_report_content(self, report_id: str, content: str) -> bool:
+        if not self.admin_token or not report_id or not content:
+            return False
+        patch = [
+            {
+                "key": "content",
+                "operation": "replace",
+                "value": [escape_markdown(content.strip())],
+            }
+        ]
+        mutations = [
+            """
+            mutation ReportEdit($id: ID!, $input: [EditInput]!) {
+              reportEdit(id: $id) {
+                fieldPatch(input: $input) { id }
+              }
+            }
+            """,
+            """
+            mutation StixEdit($id: ID!, $input: [EditInput]!) {
+              stixDomainObjectEdit(id: $id) {
+                fieldPatch(input: $input) { id }
+              }
+            }
+            """,
+        ]
+        for mutation in mutations:
+            try:
+                if "stixDomainObjectEdit" in mutation and not self._stix_core_object_exists(
+                    report_id
+                ):
+                    return False
                 self._post(mutation, {"id": report_id, "input": patch})
                 return True
             except Exception:
@@ -456,6 +536,8 @@ class OpenCTIClient:
     def update_identity_name(self, identity_id: str, name: str) -> None:
         if not self.admin_token or not identity_id or not name:
             return
+        if not self._stix_core_object_exists(identity_id):
+            return
         mutation = """
         mutation IdentityEdit($id: ID!, $input: [EditInput]!) {
           stixDomainObjectEdit(id: $id) {
@@ -476,7 +558,10 @@ class OpenCTIClient:
             self._software_checked = True
             if not self._supports_mutation("softwareAdd"):
                 self._software_supported = False
-                logger.warning("opencti_software_disabled")
+                if self._introspection_disabled:
+                    logger.info("opencti_software_disabled introspection_disabled=true")
+                else:
+                    logger.warning("opencti_software_disabled")
                 return None
         query = """
         query SoftwareByName($name: Any!) {
@@ -537,7 +622,11 @@ class OpenCTIClient:
         try:
             data = self._post(query, {})
         except Exception as exc:
-            logger.warning("opencti_schema_query_failed error=%s", exc)
+            msg = str(exc).lower()
+            if "introspection not authorized" in msg:
+                self._introspection_disabled = True
+            else:
+                logger.warning("opencti_schema_query_failed error=%s", exc)
             return False
         fields = data.get("__schema", {}).get("mutationType", {}).get("fields", [])
         for field in fields:

@@ -79,9 +79,13 @@ def refresh_collections(storage: Storage, limit: int = 100) -> int:
             break
         for item in payload:
             collection_id = item.get("key") or ""
-            name = item.get("data", {}).get("name") or ""
+            data = item.get("data", {}) or {}
+            name = data.get("name") or ""
+            parent_id = data.get("parentCollection") or ""
             if collection_id and name:
-                storage.upsert_zotero_collection(collection_id, name, approved=False)
+                storage.upsert_zotero_collection(
+                    collection_id, name, approved=False, parent_id=parent_id
+                )
                 count += 1
         offset += limit
     return count

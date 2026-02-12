@@ -13,6 +13,7 @@
 - OpenCTI requires Elasticsearch + Redis + RabbitMQ + Postgres.
 - Use persistent volumes.
 - Provide healthchecks for all services.
+- Some connectors also write to a shared mapping database volume (`mapping-data`). If you see permission errors (e.g., `attempt to write a readonly database`), ensure the volume is owned by the connector user (uid=100,gid=101 by default for `app`). You can run `scripts/fix_volume_permissions.sh` once to chown the relevant volumes.
 - Provide profiles:
   - `dev` (everything local)
   - `prod` (reverse proxy, TLS, externalized secrets) - future
