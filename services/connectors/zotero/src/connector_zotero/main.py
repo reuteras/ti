@@ -742,9 +742,7 @@ class ZoteroConnector:
                 if not abstract.strip():
                     fallback = _fallback_description_from_fulltext(normalized)
                     if fallback:
-                        desc_hash = hashlib.sha256(
-                            fallback.encode("utf-8")
-                        ).hexdigest()
+                        desc_hash = hashlib.sha256(fallback.encode("utf-8")).hexdigest()
                         if self.state.remember_hash(
                             "zotero_fulltext_desc", f"{report_id}:{desc_hash}"
                         ):

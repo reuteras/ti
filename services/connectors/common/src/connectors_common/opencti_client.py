@@ -296,8 +296,9 @@ class OpenCTIClient:
         ]
         for mutation in mutations:
             try:
-                if "stixDomainObjectEdit" in mutation and not self._stix_core_object_exists(
-                    report_id
+                if (
+                    "stixDomainObjectEdit" in mutation
+                    and not self._stix_core_object_exists(report_id)
                 ):
                     return
                 self._post(mutation, {"id": report_id, "input": patch})
@@ -369,8 +370,9 @@ class OpenCTIClient:
         ]
         for mutation in mutations:
             try:
-                if "stixDomainObjectEdit" in mutation and not self._stix_core_object_exists(
-                    report_id
+                if (
+                    "stixDomainObjectEdit" in mutation
+                    and not self._stix_core_object_exists(report_id)
                 ):
                     return False
                 self._post(mutation, {"id": report_id, "input": patch})
@@ -407,8 +409,9 @@ class OpenCTIClient:
         ]
         for mutation in mutations:
             try:
-                if "stixDomainObjectEdit" in mutation and not self._stix_core_object_exists(
-                    report_id
+                if (
+                    "stixDomainObjectEdit" in mutation
+                    and not self._stix_core_object_exists(report_id)
                 ):
                     return False
                 self._post(mutation, {"id": report_id, "input": patch})

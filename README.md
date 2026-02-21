@@ -33,7 +33,7 @@ OpenCTI’s “official” way for connectors is typically via their connector f
 - Prefer the official OpenCTI Python client / connector patterns if feasible
 - But for MVP, it’s acceptable to talk GraphQL directly (fewer moving parts), as long as it’s idempotent and stable.
 
-## Manuall connectors
+## Manual connectors
 
 From OpenCTI Integrations Library, [hub](https://hub.filigran.io/cybersecurity-solutions/open-cti-integrations).
 

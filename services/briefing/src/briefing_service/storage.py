@@ -480,6 +480,7 @@ class Storage:
                 [(cid,) for cid in approved],
             )
             self._commit()
+
     def set_zotero_collection_approved(
         self, collection_id: str, approved: bool
     ) -> None:
