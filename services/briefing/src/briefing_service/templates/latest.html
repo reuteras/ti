@@ -263,7 +263,7 @@
                     {% endif %}
                   </div>
                   {% if item.description %}
-                    <div>{{ item.description[:260] }}{% if item.description|length > 260 %}...{% endif %}</div>
+                    <div>{{ item.description | truncate(260, killwords=False, end='...') }}</div>
                   {% endif %}
                   {% if item.source_url %}
                     <div><a href="{{ item.source_url }}">Open source</a></div>
