@@ -44,12 +44,49 @@
         font-size: 0.95rem;
         color: rgba(248, 250, 252, 0.72);
       }
+      header .nav {
+        margin-top: 10px;
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      header .nav a {
+        color: #cfe1ff;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 0.9rem;
+      }
+      header .nav a:hover { color: #ffffff; }
       main {
         max-width: 980px;
         margin: 32px auto 60px;
         padding: 0 24px;
       }
-      .card {
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      .summary .metric {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 14px 16px;
+        box-shadow: var(--shadow);
+      }
+      .metric .label {
+        color: var(--muted);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .metric .value {
+        margin-top: 5px;
+        font-size: 1.5rem;
+        font-weight: 700;
+      }
+      .cluster {
         background: var(--panel);
         border: 1px solid var(--border);
         border-radius: 16px;
@@ -57,17 +94,26 @@
         margin-bottom: 20px;
         box-shadow: var(--shadow);
       }
-      .card h2 {
+      .cluster h2 {
         margin: 0 0 8px;
-        font-size: 1.2rem;
+        font-size: 1.15rem;
       }
       .meta {
         color: var(--muted);
         font-size: 0.85rem;
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
-        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .chip {
+        display: inline-flex;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--chip-bg);
+        color: var(--chip-ink);
+        font-size: 0.75rem;
+        margin: 4px 6px 0 0;
       }
       .badge {
         display: inline-flex;
@@ -82,25 +128,23 @@
         background: rgba(192, 54, 44, 0.1);
         color: var(--warn);
       }
-      .chip {
-        display: inline-flex;
-        padding: 4px 10px;
-        border-radius: 999px;
-        background: var(--chip-bg);
-        color: var(--chip-ink);
-        font-size: 0.75rem;
-        margin: 4px 6px 0 0;
+      .cluster-items {
+        border-top: 1px solid var(--border);
+        margin-top: 14px;
+        padding-top: 14px;
       }
-      .links {
-        margin-top: 12px;
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
+      .cluster-item {
+        padding: 8px 0;
+      }
+      .cluster-item + .cluster-item {
+        border-top: 1px dashed var(--border);
+      }
+      .cluster-item .title {
+        font-weight: 600;
       }
       a {
         color: var(--accent);
         text-decoration: none;
-        font-weight: 600;
       }
       a:hover { color: var(--accent-2); }
       .empty {
@@ -118,36 +162,115 @@
       <div class="kicker">OpenCTI Briefing</div>
       <h1>Daily Briefing</h1>
       <div class="date">{{ date }}</div>
+      <div class="nav">
+        <a href="/">Home</a>
+        <a href="/briefings/">Briefing Archive</a>
+      </div>
     </header>
     <main>
-      {% if items %}
-        {% for item in items %}
-          <section class="card">
-            <h2>{{ item.title }}</h2>
+      <section class="summary">
+        <div class="metric">
+          <div class="label">Total Reports</div>
+          <div class="value">{{ summary.total_reports }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Correlated Clusters</div>
+          <div class="value">{{ summary.total_clusters }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">Watch Hits</div>
+          <div class="value">{{ summary.watch_hits }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">New CVEs</div>
+          <div class="value">{{ summary.new_cves }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">New IOCs</div>
+          <div class="value">{{ summary.new_iocs }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">CISA KEV New</div>
+          <div class="value">{{ summary.cisa_kev_new }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">CISA KEV Updated</div>
+          <div class="value">{{ summary.cisa_kev_updated }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">New Intrusion Sets</div>
+          <div class="value">{{ summary.new_intrusion_sets }}</div>
+        </div>
+      </section>
+      {% if summary.kev_update_field and summary.kev_update_field != "none" %}
+        <div class="meta">KEV update window field: {{ summary.kev_update_field }}</div>
+      {% endif %}
+      {% if summary.opencti_links %}
+        <div class="meta">
+          <span>OpenCTI quick searches:</span>
+          <a href="{{ summary.opencti_links.new_cves }}">New CVEs</a>
+          <a href="{{ summary.opencti_links.new_iocs }}">New IOCs</a>
+          <a href="{{ summary.opencti_links.kev_new }}">New KEVs</a>
+          <a href="{{ summary.opencti_links.kev_updated }}">Updated KEVs</a>
+          <a href="{{ summary.opencti_links.intrusion_sets }}">New Intrusion Sets</a>
+        </div>
+      {% endif %}
+      {% if summary.intrusion_sets %}
+        <div class="meta">
+          <span>New Intrusion Sets:</span>
+          {% for item in summary.intrusion_sets %}
+            <a href="{{ item.opencti_url }}">{{ item.name }}</a>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% if clusters %}
+        {% for cluster in clusters %}
+          <section class="cluster">
+            <h2>{{ cluster.headline }}</h2>
             <div class="meta">
-              <span>Created: {{ item.created_at }}</span>
-              {% if item.watch_hit %}
-                <span class="badge warn">Watch alert</span>
+              <span>Score {{ cluster.score }}</span>
+              <span>{{ cluster.item_count }} related reports</span>
+              {% if cluster.first_seen %}
+                <span>First seen {{ cluster.first_seen }}</span>
+              {% endif %}
+              {% if cluster.last_seen %}
+                <span>Last seen {{ cluster.last_seen }}</span>
+              {% endif %}
+              {% if cluster.watch_hits %}
+                <span class="badge warn">{{ cluster.watch_hits }} watch alerts</span>
               {% endif %}
             </div>
-            <p>{{ item.description }}</p>
-            {% if item.cves %}
-              <div>
-                {% for cve in item.cves %}
-                  <span class="chip">{{ cve }}</span>
-                {% endfor %}
-              </div>
-            {% endif %}
-            {% if item.observables %}
-              <div>
-                {% for obs in item.observables %}
-                  <span class="chip">{{ obs }}</span>
-                {% endfor %}
-              </div>
-            {% endif %}
-            {% if item.source_url %}
-              <div class="links"><a href="{{ item.source_url }}">Open source</a></div>
-            {% endif %}
+            <div>
+              {% for reason in cluster.rationale %}
+                <span class="chip">{{ reason }}</span>
+              {% endfor %}
+              {% for cve in cluster.cves %}
+                <span class="chip">{{ cve }}</span>
+              {% endfor %}
+              {% for domain in cluster.source_domains %}
+                <span class="chip">{{ domain }}</span>
+              {% endfor %}
+            </div>
+            <div class="cluster-items">
+              {% for item in cluster.items %}
+                <div class="cluster-item">
+                  <div class="title">{{ item.title }}</div>
+                  <div class="meta">
+                    <span>{{ item.created_at }}</span>
+                    {% if item.watch_hit %}
+                      <span class="badge warn">Watch alert</span>
+                    {% endif %}
+                  </div>
+                  {% if item.description %}
+                    <div>{{ item.description[:260] }}{% if item.description|length > 260 %}...{% endif %}</div>
+                  {% endif %}
+                  {% if item.source_url %}
+                    <div><a href="{{ item.source_url }}">Open source</a></div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
           </section>
         {% endfor %}
       {% else %}

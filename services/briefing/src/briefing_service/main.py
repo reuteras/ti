@@ -186,10 +186,11 @@ def on_startup() -> None:
             logger.info("readwise_tags_refreshed count=%s", tag_count)
 
     tz_name = os.getenv("BRIEFING_TIMEZONE", "Europe/Stockholm")
+    storage.set_state("briefing_timezone", tz_name)
     scheduler = BackgroundScheduler(timezone=ZoneInfo(tz_name))
     trigger = CronTrigger(
         hour=_get_env_int("BRIEFING_SCHEDULE_HOUR", 4),
-        minute=_get_env_int("BRIEFING_SCHEDULE_MINUTE", 5),
+        minute=_get_env_int("BRIEFING_SCHEDULE_MINUTE", 0),
     )
     scheduler.add_job(run_daily_job, trigger, id="daily_briefing")
     scheduler.add_job(
@@ -317,6 +318,11 @@ async def index() -> str:
             "Daily briefings RSS",
             "Subscribe to daily briefing feed.",
         ),
+        (
+            "/briefings/",
+            "Briefing archive",
+            "Browse available daily briefing reports.",
+        ),
         ("/latest", "Latest briefing", "View the most recent briefing."),
     ]
     template = env.get_template("index.html")
@@ -343,6 +349,15 @@ async def today() -> str:
     return latest_briefing.html
 
 
+@app.get("/briefings/", response_class=HTMLResponse)
+async def briefing_archive() -> str:
+    if storage is None:
+        return "<html><body>Storage not ready</body></html>"
+    briefings = storage.get_recent_briefings(limit=3650)
+    template = env.get_template("briefings_archive.html")
+    return template.render(briefings=briefings)
+
+
 @app.get("/briefings/{date}.json")
 async def briefing_json(date: str) -> Response:
     if storage is None:
@@ -351,6 +366,16 @@ async def briefing_json(date: str) -> Response:
     if not briefing:
         return Response(content="{}", media_type="application/json")
     return Response(content=briefing.json, media_type="application/json")
+
+
+@app.get("/briefings/{date}.html", response_class=HTMLResponse)
+async def briefing_html(date: str) -> str:
+    if storage is None:
+        return "<html><body>Storage not ready</body></html>"
+    briefing = storage.get_briefing(date)
+    if not briefing:
+        return "<html><body>No briefing available</body></html>"
+    return briefing.html
 
 
 @app.get("/feeds/daily.rss", response_class=Response)

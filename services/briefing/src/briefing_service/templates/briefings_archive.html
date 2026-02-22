@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>Briefing Archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --ink: #0b1f3a;
+        --muted: #5f6f81;
+        --accent: #2f6feb;
+        --accent-2: #12b5cb;
+        --border: #d9e2ec;
+        --shadow: 0 18px 40px rgba(15, 28, 45, 0.08);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        background: linear-gradient(135deg, #f5f7fb 0%, #eef4ff 35%, #f7f9fc 100%);
+        color: var(--ink);
+      }
+      header {
+        background: radial-gradient(circle at top right, rgba(47, 111, 235, 0.28), transparent 55%), #0b1f3a;
+        color: #f8fafc;
+        padding: 24px 32px;
+      }
+      header .kicker {
+        font-size: 0.75rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: rgba(248, 250, 252, 0.6);
+      }
+      header h1 {
+        margin: 6px 0 0;
+        font-size: 1.8rem;
+      }
+      main {
+        max-width: 1100px;
+        margin: 28px auto 60px;
+        padding: 0 24px;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .link {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .link:hover { color: var(--accent-2); }
+      .count { color: var(--muted); font-size: 0.9rem; }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 16px;
+        box-shadow: var(--shadow);
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.95rem;
+      }
+      th, td {
+        padding: 12px 10px;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .empty {
+        color: var(--muted);
+        padding: 12px 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="kicker">OpenCTI Briefing</div>
+      <h1>Briefing Archive</h1>
+    </header>
+    <main>
+      <div class="toolbar">
+        <a class="link" href="/">Home</a>
+        <a class="link" href="/latest">Latest briefing</a>
+        <span class="count">Total briefings: {{ briefings|length }}</span>
+      </div>
+      <div class="panel">
+        {% if briefings %}
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>HTML</th>
+                <th>JSON</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for briefing in briefings %}
+                <tr>
+                  <td>{{ briefing.date }}</td>
+                  <td><a class="link" href="/briefings/{{ briefing.date }}.html">Open</a></td>
+                  <td><a class="link" href="/briefings/{{ briefing.date }}.json">Open</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">No briefings available.</div>
+        {% endif %}
+      </div>
+    </main>
+  </body>
+</html>

@@ -191,6 +191,7 @@ services:
       - .env
     environment:
       - OPENCTI_URL=${OPENCTI_URL:-http://opencti:8080}
+      - OPENCTI_EXTERNAL_URL=${OPENCTI_EXTERNAL_URL:-}
       - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN}
       - OPENCTI_APP__ADMIN__TOKEN=${OPENCTI_APP__ADMIN__TOKEN}
       - BRIEFING_DB_PATH=${BRIEFING_DB_PATH:-/data/briefing.sqlite}
