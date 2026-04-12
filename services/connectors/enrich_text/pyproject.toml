@@ -5,7 +5,7 @@ description = "Text enrichment connector"
 requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.27.0",
-  "python-dateutil>=2.9.0",
+  "python-dateutil>=2.9.0.post0",
   "pycti>=6.9.0,<8.0.0",
 ]
 
