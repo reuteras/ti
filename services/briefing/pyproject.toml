@@ -5,7 +5,7 @@ description = "Briefing service for personal CTI"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0",
-  "uvicorn[standard]>=0.30.0",
+  "uvicorn[standard]>=0.43.0",
   "apscheduler>=3.10.4",
   "httpx>=0.27.0",
   "jinja2>=3.1.4",
