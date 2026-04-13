@@ -12,6 +12,9 @@ dependencies = [
 [tool.uv]
 package = true
 
+[tool.uv.sources]
+connectors-common = { path = "../common" }
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/connector_cvelist"]
 
