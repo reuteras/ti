@@ -1,44 +1,64 @@
 ---
 version: 2
+registries:
+  dockerhub:
+    type: docker-registry
+    url: https://registry.hub.docker.com
+    username: ${{secrets.DOCKERHUB_USERNAME}}
+    password: ${{secrets.DOCKERHUB_PASSWORD}}
 updates:
   - package-ecosystem: "docker"
     directory: "/services/briefing"
+    registries:
+      - dockerhub
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 7
   - package-ecosystem: "docker"
     directory: "/services/connectors/awesome_annual_security_reports"
+    registries:
+      - dockerhub
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 7
   - package-ecosystem: "docker"
     directory: "/services/connectors/cvelist"
+    registries:
+      - dockerhub
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 7
   - package-ecosystem: "docker"
     directory: "/services/connectors/enrich_text"
+    registries:
+      - dockerhub
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 7
   - package-ecosystem: "docker"
     directory: "/services/connectors/miniflux"
+    registries:
+      - dockerhub
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 7
   - package-ecosystem: "docker"
     directory: "/services/connectors/readwise"
+    registries:
+      - dockerhub
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 7
   - package-ecosystem: "docker"
     directory: "/services/connectors/zotero"
+    registries:
+      - dockerhub
     schedule:
       interval: "weekly"
     cooldown:
