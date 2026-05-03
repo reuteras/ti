@@ -262,7 +262,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "pycti", specifier = ">=6.9.0,<8.0.0" },
+    { name = "pycti", specifier = ">=7.260423.0,<8.0.0" },
     { name = "python-dateutil", specifier = ">=2.9.0" },
     { name = "pyzotero", specifier = ">=1.5.0" },
 ]
@@ -560,7 +560,7 @@ wheels = [
 
 [[package]]
 name = "pycti"
-version = "7.260417.0"
+version = "7.260423.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -584,9 +584,9 @@ dependencies = [
     { name = "stix2" },
     { name = "uvicorn", extra = ["standard"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/62/84/268198a83e39213da76d43e736bb1ee86218461eae84a02782878804602d/pycti-7.260417.0.tar.gz", hash = "sha256:49beb7273e28fdfa130c6ffac46db0c43cd472ad64c52fb93b65413b66d10267", size = 255238, upload-time = "2026-04-17T16:55:25.697Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/84/d1/5da2b2f32b6663c9fa7066c5cb08fa8de017721f59076ca537c90d379386/pycti-7.260423.0.tar.gz", hash = "sha256:89c83ad199436a481dcdb3899359e60c66a3b059439a64651fef96f550f9a8ee", size = 255610, upload-time = "2026-04-23T15:56:01.314Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/cf/a54be616cd423df3ee850070194086fc45be21295db1fe959dd83df07fbc/pycti-7.260417.0-py3-none-any.whl", hash = "sha256:735b6897dbd86737229545a738092a21381592226e364090f241dd89938f6040", size = 347536, upload-time = "2026-04-17T16:55:23.977Z" },
+    { url = "https://files.pythonhosted.org/packages/94/32/2e3e738d505c7873370e993a8d43658f61645985c7a17d70fa4a8402becd/pycti-7.260423.0-py3-none-any.whl", hash = "sha256:0c83720d6ba96b0e79e5d8f5a947f2d285b5dc651733094c899d801f85e975c2", size = 347850, upload-time = "2026-04-23T15:55:59.501Z" },
 ]
 
 [[package]]
