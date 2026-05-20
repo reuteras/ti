@@ -1,5 +1,7 @@
 # personal-cti (OpenCTI-first)
 
+**Update:** Not running this at the moment therefore the code is archived.
+
 Personal Threat Intel platform (ti):
 - OpenCTI as the primary knowledge base (STIX 2.1 / graph UI / ATT&CK objects)
 - Custom connectors for personal sources:
